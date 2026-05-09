@@ -1,63 +1,50 @@
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+// src/screens/RoleSelectScreen.js
+import { Ionicons } from '@expo/vector-icons';
+import { StyleSheet, Text, TouchableOpacity, View, ScrollView } from 'react-native';
 
-// navigation is automatically passed by React Navigation to every screen
+const roles = [
+  { label: 'Student', icon: 'school-outline', screen: 'StudentStack', color: '#1E56A0' },
+  { label: 'Supervisor', icon: 'person-outline', screen: 'SupervisorStack', color: '#163172' },
+  { label: 'Head of Department', icon: 'business-outline', screen: 'HODStack', color: '#0D3B66' },
+  { label: 'Internal Evaluator', icon: 'clipboard-outline', screen: 'EvaluatorStack', color: '#1B4332' },
+  { label: 'FPGC-R', icon: 'people-outline', screen: 'FPGCRStack', color: '#4A1942' },
+  { label: 'FPGC', icon: 'shield-checkmark-outline', screen: 'FPGCStack', color: '#7C2D12' },
+];
+
 export default function RoleSelectScreen({ navigation }) {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>PGMS</Text>
-      <Text style={styles.subtitle}>Select your role to continue</Text>
+      <View style={styles.top}>
+        <Text style={styles.title}>PGMS</Text>
+        <Text style={styles.subtitle}>Select your role to continue</Text>
+      </View>
 
-      {/* TouchableOpacity is basically a pressable button */}
-      <TouchableOpacity
-        style={styles.button}
-        onPress={() => navigation.navigate('StudentStack')}
-      >
-        <Text style={styles.buttonText}>I am a Student</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={[styles.button, styles.supervisorButton]}
-        onPress={() => navigation.navigate('SupervisorStack')}
-      >
-        <Text style={styles.buttonText}>I am a Supervisor</Text>
-      </TouchableOpacity>
+      <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+        {roles.map((role) => (
+          <TouchableOpacity
+            key={role.screen}
+            style={[styles.button, { backgroundColor: role.color }]}
+            onPress={() => navigation.navigate(role.screen)}
+          >
+            <Ionicons name={role.icon} size={24} color="#FFFFFF" />
+            <Text style={styles.buttonText}>{role.label}</Text>
+            <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.6)" />
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0A1931',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  title: {
-    fontSize: 42,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#9BA4B5',
-    marginBottom: 48,
-  },
+  container: { flex: 1, backgroundColor: '#0A1931' },
+  top: { alignItems: 'center', paddingTop: 80, paddingBottom: 40 },
+  title: { fontSize: 48, fontWeight: 'bold', color: '#FFFFFF', letterSpacing: 2 },
+  subtitle: { fontSize: 16, color: '#9BA4B5', marginTop: 8 },
+  list: { paddingHorizontal: 24, paddingBottom: 40, gap: 12 },
   button: {
-    backgroundColor: '#1E56A0',
-    width: '100%',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    padding: 18, borderRadius: 16,
   },
-  supervisorButton: {
-    backgroundColor: '#163172',
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  buttonText: { flex: 1, color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
 });
