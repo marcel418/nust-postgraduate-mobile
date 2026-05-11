@@ -32,6 +32,9 @@ import { HODAssignInternalEvaluatorScreen, HODProposeExternalScreen } from '../s
 // ─── Internal Evaluator ───────────────────────────────────────────────────────
 import { EvaluatorDashboard, EvaluatorEvaluations, EvaluatorProposalDetail, EvaluatorProfile, EvaluatorNotifications } from '../screens/evaluator/EvaluatorScreens';
 
+// ─── External Evaluator ───────────────────────────────────────────────────────
+import { ExternalEvaluatorClaims, ExternalEvaluatorDashboard, ExternalEvaluatorNotifications, ExternalEvaluatorProfile, ExternalEvaluatorThesisDetail, ExternalEvaluatorTheses } from '../screens/externalEvaluator/ExternalEvaluatorScreens';
+
 // ─── FPGC-R ───────────────────────────────────────────────────────────────────
 import { FPGCRDashboard, FPGCRReviews, FPGCRHdcDecision, FPGCRDecisions, FPGCRProfile, FPGCRNotifications } from '../screens/fpgcr/FPGCRScreens';
 
@@ -130,6 +133,27 @@ function EvaluatorStack() {
   );
 }
 
+// ─── External Evaluator ───────────────────────────────────────────────────────
+function ExternalEvaluatorTabs() {
+  return (
+    <Tab.Navigator screenOptions={({ route }) => ({ tabBarActiveTintColor: '#1E56A0', tabBarInactiveTintColor: '#9BA4B5', headerShown: false, tabBarIcon: ({ color, size }) => <Ionicons name={{ ExtHome: 'home', ExtTheses: 'document-text', ExtClaims: 'wallet', ExtProfile: 'person' }[route.name]} size={size} color={color} /> })}>
+      <Tab.Screen name="ExtHome" component={ExternalEvaluatorDashboard} options={{ tabBarLabel: 'Home' }} />
+      <Tab.Screen name="ExtTheses" component={ExternalEvaluatorTheses} options={{ tabBarLabel: 'Thesis' }} />
+      <Tab.Screen name="ExtClaims" component={ExternalEvaluatorClaims} options={{ tabBarLabel: 'Claims' }} />
+      <Tab.Screen name="ExtProfile" component={ExternalEvaluatorProfile} options={{ tabBarLabel: 'Profile' }} />
+    </Tab.Navigator>
+  );
+}
+function ExternalEvaluatorStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="ExtTabs" component={ExternalEvaluatorTabs} />
+      <Stack.Screen name="ExtThesisDetail" component={ExternalEvaluatorThesisDetail} />
+      <Stack.Screen name="ExtNotifications" component={ExternalEvaluatorNotifications} />
+    </Stack.Navigator>
+  );
+}
+
 // ─── FPGC-R ───────────────────────────────────────────────────────────────────
 function FPGCRTabs() {
   return (
@@ -184,6 +208,7 @@ export default function Navigation() {
       <Stack.Screen name="SupervisorStack" component={SupervisorStack} />
       <Stack.Screen name="HODStack" component={HODStack} />
       <Stack.Screen name="EvaluatorStack" component={EvaluatorStack} />
+      <Stack.Screen name="ExternalEvaluatorStack" component={ExternalEvaluatorStack} />
       <Stack.Screen name="FPGCRStack" component={FPGCRStack} />
       <Stack.Screen name="FPGCStack" component={FPGCStack} />
     </Stack.Navigator>
