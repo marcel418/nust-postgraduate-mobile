@@ -18,6 +18,8 @@ import AdminDashboardScreen from '../screens/admin/DashboardScreen';
 import UsersScreen from '../screens/admin/UsersScreen';
 import SubmissionsOverviewScreen from '../screens/admin/SubmissionsOverviewScreen';
 import SettingsScreen from '../screens/admin/SettingsScreen';
+import AdminNotificationsScreen from '../screens/admin/NotificationsScreen';
+import AdminProfileScreen from '../screens/supervisor/ProfileScreen';
 
 // ─── Supervisor ───────────────────────────────────────────────────────────────
 import SupervisorDashboardScreen from '../screens/supervisor/DashboardScreen';
@@ -212,6 +214,8 @@ function AdminStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="AdminTabs" component={AdminTabs} />
+      <Stack.Screen name="NotificationsList" component={AdminNotificationsScreen} />
+      <Stack.Screen name="Profile" component={AdminProfileScreen} />
     </Stack.Navigator>
   );
 }
