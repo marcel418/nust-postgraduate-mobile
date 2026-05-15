@@ -7,6 +7,8 @@ import {
     STUDENTS,
     SUBMISSIONS,
     TASKS,
+    ALL_USERS,
+    SYSTEM_STATS,
 } from '../data/mockData';
 
 // CONFIG
@@ -182,4 +184,45 @@ export const getNotifications = async (userId) => {
   }
   // TODO: GET /users/:userId/notifications
   return http(`/users/${userId}/notifications`);
+};
+
+
+// ADMIN SERVICES
+export const getSystemStats = async () => {
+  if (USE_MOCK) {
+    await delay(500);
+    return SYSTEM_STATS;
+  }
+  // TODO: GET /admin/stats
+  return http('/admin/stats');
+};
+
+export const getAllUsers = async () => {
+  if (USE_MOCK) {
+    await delay(600);
+    return ALL_USERS;
+  }
+  // TODO: GET /admin/users
+  return http('/admin/users');
+};
+
+export const toggleUserStatus = async (userId, status) => {
+  if (USE_MOCK) {
+    await delay(500);
+    return { userId, status };
+  }
+  // TODO: PATCH /admin/users/:userId
+  return http(`/admin/users/${userId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+};
+
+export const getAllSubmissions = async () => {
+  if (USE_MOCK) {
+    await delay(600);
+    return SUBMISSIONS;
+  }
+  // TODO: GET /admin/submissions
+  return http('/admin/submissions');
 };

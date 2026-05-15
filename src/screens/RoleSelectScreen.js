@@ -9,6 +9,7 @@ const roles = [
   { label: 'Internal Evaluator', icon: 'clipboard-outline', screen: 'EvaluatorStack', color: '#1B4332' },
   { label: 'FPGC-R', icon: 'people-outline', screen: 'FPGCRStack', color: '#4A1942' },
   { label: 'FPGC', icon: 'shield-checkmark-outline', screen: 'FPGCStack', color: '#7C2D12' },
+  { label: 'System Admin', icon: 'settings-outline', screen: 'AdminStack', color: '#1A1A2E' },
 ];
 
 export default function RoleSelectScreen({ navigation }) {
@@ -47,4 +48,7 @@ const styles = StyleSheet.create({
     padding: 18, borderRadius: 16,
   },
   buttonText: { flex: 1, color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  adminButton: {
+    backgroundColor: '#0D1B2A',
+  },
 });

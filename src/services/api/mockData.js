@@ -94,3 +94,69 @@ export const mockHoDData = {
     },
   ],
 };
+export const CURRENT_ADMIN = {
+  id: 'ADM001',
+  name: 'System Administrator',
+  email: 'admin@nust.na',
+  role: 'System Admin',
+};
+
+export const ALL_USERS = [
+  {
+    id: 'STU001',
+    name: 'Noel McBride',
+    role: 'Student',
+    email: 'noel@nust.na',
+    status: 'Active',
+    course: 'Bachelor of Computer Science: Honours',
+  },
+  {
+    id: 'STU002',
+    name: 'Martha Stewart',
+    role: 'Student',
+    email: 'martha@nust.na',
+    status: 'Active',
+    course: 'Bachelor of Cyber Security: Honours',
+  },
+  {
+    id: 'STU003',
+    name: 'Marcel Mabuta',
+    role: 'Student',
+    email: 'marcel@nust.na',
+    status: 'Active',
+    course: 'Bachelor of Information Systems: Honours',
+  },
+  {
+    id: 'STU004',
+    name: 'Abraham Namaseb',
+    role: 'Student',
+    email: 'abraham@nust.na',
+    status: 'Inactive',
+    course: 'Bachelor of Software Engineering: Honours',
+  },
+  {
+    id: 'SUP001',
+    name: 'Prof. Doe',
+    role: 'Supervisor',
+    email: 'doe@nust.na',
+    status: 'Active',
+    department: 'Computer Science',
+  },
+  {
+    id: 'SUP002',
+    name: 'Dr. Frankenstein',
+    role: 'Supervisor',
+    email: 'frank@nust.na',
+    status: 'Active',
+    department: 'HDC',
+  },
+];
+
+export const SYSTEM_STATS = {
+  totalStudents: 4,
+  totalSupervisors: 2,
+  totalSubmissions: 3,
+  pendingReviews: 1,
+  approved: 1,
+  returned: 1,
+};

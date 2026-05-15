@@ -14,6 +14,11 @@ import StudentProfile from '../screens/student/ProfileScreen';
 import ProgressScreen from '../screens/student/ProgressScreen';
 import SubmissionsScreen from '../screens/student/SubmissionsScreen';
 
+import AdminDashboardScreen from '../screens/admin/DashboardScreen';
+import UsersScreen from '../screens/admin/UsersScreen';
+import SubmissionsOverviewScreen from '../screens/admin/SubmissionsOverviewScreen';
+import SettingsScreen from '../screens/admin/SettingsScreen';
+
 // ─── Supervisor ───────────────────────────────────────────────────────────────
 import SupervisorDashboardScreen from '../screens/supervisor/DashboardScreen';
 import GradeThesisScreen from '../screens/supervisor/GradeThesisScreen';
@@ -175,6 +180,42 @@ function FPGCStack() {
   );
 }
 
+function AdminTabs() {
+  return (
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        tabBarActiveTintColor: '#1E56A0',
+        tabBarInactiveTintColor: '#9BA4B5',
+        headerShown: false,
+        tabBarIcon: ({ color, size }) => {
+          const icons = {
+            Home: 'home',
+            Users: 'people',
+            Submissions: 'document-text',
+            Settings: 'settings',
+          };
+          return (
+            <Ionicons name={icons[route.name]} size={size} color={color} />
+          );
+        },
+      })}
+    >
+      <Tab.Screen name="Home" component={AdminDashboardScreen} />
+      <Tab.Screen name="Users" component={UsersScreen} />
+      <Tab.Screen name="Submissions" component={SubmissionsOverviewScreen} />
+      <Tab.Screen name="Settings" component={SettingsScreen} />
+    </Tab.Navigator>
+  );
+}
+
+function AdminStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="AdminTabs" component={AdminTabs} />
+    </Stack.Navigator>
+  );
+}
+
 // ─── Root ─────────────────────────────────────────────────────────────────────
 export default function Navigation() {
   return (
@@ -186,6 +227,7 @@ export default function Navigation() {
       <Stack.Screen name="EvaluatorStack" component={EvaluatorStack} />
       <Stack.Screen name="FPGCRStack" component={FPGCRStack} />
       <Stack.Screen name="FPGCStack" component={FPGCStack} />
+      <Stack.Screen name="AdminStack" component={AdminStack} />
     </Stack.Navigator>
   );
 }
