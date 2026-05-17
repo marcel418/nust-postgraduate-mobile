@@ -7,6 +7,7 @@ const roles = [
   { label: 'Supervisor', icon: 'person-outline', screen: 'SupervisorStack', color: '#163172' },
   { label: 'Head of Department', icon: 'business-outline', screen: 'HODStack', color: '#0D3B66' },
   { label: 'Internal Evaluator', icon: 'clipboard-outline', screen: 'EvaluatorStack', color: '#1B4332' },
+  { label: 'External Evaluator', icon: 'document-text-outline', screen: 'ExternalEvaluatorStack', color: '#2C3E50' },
   { label: 'FPGC-R', icon: 'people-outline', screen: 'FPGCRStack', color: '#4A1942' },
   { label: 'FPGC', icon: 'shield-checkmark-outline', screen: 'FPGCStack', color: '#7C2D12' },
   { label: 'System Admin', icon: 'settings-outline', screen: 'AdminStack', color: '#1A1A2E' },
