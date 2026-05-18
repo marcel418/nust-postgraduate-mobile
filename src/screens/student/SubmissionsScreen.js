@@ -19,6 +19,8 @@ import {
 import AppHeader from '../../components/AppHeader';
 import { api } from '../../api/http';
 
+import { documentsApi } from '../../api/documentsApi';
+
 const REPORTING_PERIODS = ['Today', 'This Week', 'This Month', 'Last 30 Days'];
 
 const getStatusColor = (status) => {
@@ -279,6 +281,22 @@ export default function SubmissionsScreen({ navigation }) {
     }
   };
 
+  const handleOpenDocument = async (documentId, fileName) => {
+  if (!documentId) {
+    Alert.alert('No Document', 'This submission does not have a linked document.');
+    return;
+  }
+
+  try {
+    await documentsApi.openDocument(documentId, fileName);
+  } catch (error) {
+    Alert.alert(
+      'Could not open document',
+      error?.message || 'Please try again.'
+    );
+  }
+};
+
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
       <View style={styles.emptyIcon}>
@@ -358,6 +376,16 @@ export default function SubmissionsScreen({ navigation }) {
             </Text>
           </View>
         )}
+
+        {details.documentId && (
+  <TouchableOpacity
+    style={styles.openDocumentBtn}
+    onPress={() => handleOpenDocument(details.documentId, displayFileName)}
+  >
+    <Ionicons name="open-outline" size={16} color="#1E56A0" />
+    <Text style={styles.openDocumentText}>Open Uploaded File</Text>
+  </TouchableOpacity>
+)}
 
         {status !== 'DRAFT' && (
           <View style={styles.workflowNotice}>
@@ -846,4 +874,23 @@ const styles = StyleSheet.create({
   disabledButton: {
     opacity: 0.7,
   },
+
+  openDocumentBtn: {
+  backgroundColor: '#EFF6FF',
+  borderRadius: 10,
+  paddingVertical: 11,
+  paddingHorizontal: 12,
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+  borderWidth: 1,
+  borderColor: '#BFDBFE',
+},
+openDocumentText: {
+  color: '#1E56A0',
+  fontSize: 13,
+  fontWeight: '700',
+},
 });
+
