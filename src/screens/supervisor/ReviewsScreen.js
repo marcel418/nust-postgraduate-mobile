@@ -17,6 +17,15 @@ import {
 
 import AppHeader from '../../components/AppHeader';
 import { submissionsApi } from '../../api/submissionsApi';
+import { documentsApi } from '../../api/documentsApi';
+import {
+  formatDate,
+  formatLabel,
+  getInitials,
+  getStatusColor,
+  getStatusLabel,
+  normalizeSubmission,
+} from './supervisorHelpers';
 
 const FILTERS = [
   { label: 'Pending', value: 'SUBMITTED' },
@@ -25,105 +34,6 @@ const FILTERS = [
   { label: 'All', value: 'ALL' },
 ];
 
-function formatState(state) {
-  if (!state) return 'Unknown';
-
-  if (state === 'SUBMITTED') return 'In Review';
-
-  return String(state)
-    .replace(/_/g, ' ')
-    .toLowerCase()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function formatDate(value) {
-  if (!value) return 'N/A';
-
-  try {
-    return new Date(value).toLocaleDateString('en-US', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-  } catch {
-    return 'N/A';
-  }
-}
-
-function getStatusColor(state) {
-  switch (state) {
-    case 'SUBMITTED':
-      return '#7C3AED';
-    case 'APPROVED_BY_SUPERVISOR':
-      return '#22C55E';
-    case 'REVISIONS_REQUIRED':
-      return '#F59E0B';
-    case 'REJECTED':
-      return '#EF4444';
-    case 'DRAFT':
-      return '#6B7280';
-    default:
-      return '#6B7280';
-  }
-}
-
-function parseDescription(description) {
-  if (!description) {
-    return {
-      comments: '',
-      reportingPeriod: 'N/A',
-      fileName: '',
-      fileSize: '',
-    };
-  }
-
-  try {
-    const parsed = JSON.parse(description);
-
-    return {
-      comments: parsed.comments || '',
-      reportingPeriod: parsed.reportingPeriod || 'N/A',
-      fileName: parsed.fileName || '',
-      fileSize: parsed.fileSize || '',
-    };
-  } catch {
-    return {
-      comments: description,
-      reportingPeriod: 'N/A',
-      fileName: '',
-      fileSize: '',
-    };
-  }
-}
-
-function getStudentDisplayName(submission) {
-  return (
-    submission.student_name ||
-    submission.student?.name ||
-    submission.created_by_name ||
-    'Student Submission'
-  );
-}
-
-function getStudentSubText(submission) {
-  if (submission.student_number) return submission.student_number;
-  if (submission.student?.student_number) return submission.student.student_number;
-  if (submission.student_id) return `Student ID: ${String(submission.student_id).slice(0, 8)}...`;
-  return 'Postgraduate student';
-}
-
-function getInitials(name) {
-  if (!name) return 'ST';
-
-  return name
-    .split(' ')
-    .filter(Boolean)
-    .map((word) => word[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
-}
-
 export default function ReviewsScreen({ navigation }) {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -131,6 +41,7 @@ export default function ReviewsScreen({ navigation }) {
 
   const [activeFilter, setActiveFilter] = useState('SUBMITTED');
   const [processingId, setProcessingId] = useState(null);
+  const [openingId, setOpeningId] = useState(null);
 
   const [returnModalVisible, setReturnModalVisible] = useState(false);
   const [selectedSubmission, setSelectedSubmission] = useState(null);
@@ -141,11 +52,13 @@ export default function ReviewsScreen({ navigation }) {
       const response = await submissionsApi.list();
       const items = response?.data?.items || response?.items || [];
 
-      const sorted = [...items].sort(
-        (a, b) =>
-          new Date(b.updated_at || b.created_at || 0) -
-          new Date(a.updated_at || a.created_at || 0)
-      );
+      const sorted = items
+        .map(normalizeSubmission)
+        .sort(
+          (a, b) =>
+            new Date(b.updatedAt || 0) -
+            new Date(a.updatedAt || 0)
+        );
 
       setSubmissions(sorted);
     } catch (error) {
@@ -166,16 +79,11 @@ export default function ReviewsScreen({ navigation }) {
   const filteredSubmissions = useMemo(() => {
     if (activeFilter === 'ALL') return submissions;
 
-    return submissions.filter(
-      (item) => (item.current_state || item.workflow_state) === activeFilter
-    );
+    return submissions.filter((item) => item.state === activeFilter);
   }, [activeFilter, submissions]);
 
   const pendingCount = useMemo(
-    () =>
-      submissions.filter(
-        (item) => (item.current_state || item.workflow_state) === 'SUBMITTED'
-      ).length,
+    () => submissions.filter((item) => item.state === 'SUBMITTED').length,
     [submissions]
   );
 
@@ -184,10 +92,29 @@ export default function ReviewsScreen({ navigation }) {
     loadSubmissions();
   };
 
+  const handleOpenDocument = async (submission) => {
+    if (!submission?.documentId) {
+      Alert.alert('No Document', 'This submission does not have a linked uploaded document.');
+      return;
+    }
+
+    try {
+      setOpeningId(submission.id);
+      await documentsApi.openDocument(submission.documentId, submission.document);
+    } catch (error) {
+      Alert.alert(
+        'Could not open document',
+        error?.message || 'Please try again.'
+      );
+    } finally {
+      setOpeningId(null);
+    }
+  };
+
   const handleApprove = (submission) => {
     Alert.alert(
       'Approve Submission',
-      `Approve "${submission.title}" and forward it to the next workflow stage?`,
+      `Approve "${submission.title}" and forward it to HOD?`,
       [
         {
           text: 'Cancel',
@@ -279,14 +206,12 @@ export default function ReviewsScreen({ navigation }) {
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
-      <Ionicons
-        name="checkmark-circle-outline"
-        size={48}
-        color="#9BA4B5"
-      />
+      <Ionicons name="checkmark-circle-outline" size={48} color="#9BA4B5" />
+
       <Text style={styles.emptyTitle}>
         {activeFilter === 'SUBMITTED' ? 'All caught up!' : 'No reviews found'}
       </Text>
+
       <Text style={styles.emptyText}>
         {activeFilter === 'SUBMITTED'
           ? 'No pending submissions to review.'
@@ -296,76 +221,94 @@ export default function ReviewsScreen({ navigation }) {
   );
 
   const renderSubmission = (submission) => {
-    const state = submission.current_state || submission.workflow_state || 'UNKNOWN';
-    const statusColor = getStatusColor(state);
-    const details = parseDescription(submission.description);
-    const canReview = state === 'SUBMITTED';
+    const canReview = submission.state === 'SUBMITTED';
     const isProcessing = processingId === submission.id;
-
-    const studentName = getStudentDisplayName(submission);
-    const studentSubText = getStudentSubText(submission);
-    const displayTitle = details.fileName || submission.title || 'Progress Report';
+    const isOpening = openingId === submission.id;
 
     return (
       <View key={submission.id} style={styles.card}>
         <View style={styles.topRow}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{getInitials(studentName)}</Text>
+            <Text style={styles.avatarText}>{getInitials(submission.student.name)}</Text>
           </View>
 
           <View style={styles.studentInfo}>
-            <Text style={styles.studentName}>{studentName}</Text>
+            <Text style={styles.studentName}>{submission.student.name}</Text>
             <Text style={styles.studentCourse} numberOfLines={1}>
-              {studentSubText}
+              {submission.student.studentNumber}
             </Text>
           </View>
 
-          <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-            <Text style={styles.statusText}>{formatState(state)}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(submission.state) }]}>
+            <Text style={styles.statusText}>{getStatusLabel(submission.state)}</Text>
           </View>
         </View>
 
         <View style={styles.fileRow}>
           <View style={styles.fileIcon}>
-            <Ionicons
-              name="document-text"
-              size={18}
-              color="#1E56A0"
-            />
+            <Ionicons name="document-text" size={18} color="#1E56A0" />
           </View>
 
           <View style={styles.fileInfo}>
             <Text style={styles.fileName} numberOfLines={1}>
-              {displayTitle}
+              {submission.document}
             </Text>
 
             <Text style={styles.fileMeta}>
-              {details.fileSize || 'Version ' + (submission.current_version_no || 1)} ·{' '}
-              {formatDate(submission.updated_at || submission.created_at)}
+              {submission.documentSize || `Version ${submission.version}`} · {formatDate(submission.updatedAt)}
             </Text>
           </View>
+
+          <TouchableOpacity
+            style={[styles.openFileButton, (!submission.documentId || isOpening) && styles.disabledButton]}
+            onPress={() => handleOpenDocument(submission)}
+            disabled={!submission.documentId || isOpening}
+          >
+            {isOpening ? (
+              <ActivityIndicator color="#1E56A0" size="small" />
+            ) : (
+              <>
+                <Ionicons
+                  name={submission.documentId ? 'open-outline' : 'document-outline'}
+                  size={15}
+                  color="#1E56A0"
+                />
+                <Text style={styles.openFileText}>
+                  {submission.documentId ? 'Open' : 'No File'}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
         </View>
 
         <View style={styles.detailRow}>
           <Ionicons name="calendar-outline" size={15} color="#6B7280" />
           <Text style={styles.detailText}>
-            Reporting period: {details.reportingPeriod || 'N/A'}
+            Reporting period: {submission.reportingPeriod || 'N/A'}
           </Text>
         </View>
 
         <View style={styles.detailRow}>
           <Ionicons name="layers-outline" size={15} color="#6B7280" />
           <Text style={styles.detailText}>
-            Type: {formatState(submission.submission_type)}
+            Type: {formatLabel(submission.type)}
           </Text>
         </View>
 
-        {!!details.comments && (
+        {!!submission.comments && (
           <View style={styles.commentsBox}>
             <Text style={styles.commentsLabel}>Student comments</Text>
-            <Text style={styles.commentsText}>{details.comments}</Text>
+            <Text style={styles.commentsText}>{submission.comments}</Text>
           </View>
         )}
+
+        <TouchableOpacity
+          style={styles.detailButton}
+          onPress={() => navigation.navigate('ReviewReport', { submission })}
+        >
+          <Ionicons name="eye-outline" size={17} color="#1E56A0" />
+          <Text style={styles.detailButtonText}>Open Full Review</Text>
+        </TouchableOpacity>
 
         {canReview ? (
           <View style={styles.actionRow}>
@@ -374,11 +317,7 @@ export default function ReviewsScreen({ navigation }) {
               onPress={() => openReturnModal(submission)}
               disabled={isProcessing}
             >
-              <Ionicons
-                name="return-down-back-outline"
-                size={17}
-                color="#EF4444"
-              />
+              <Ionicons name="return-down-back-outline" size={17} color="#EF4444" />
               <Text style={styles.returnButtonText}>Return</Text>
             </TouchableOpacity>
 
@@ -391,11 +330,7 @@ export default function ReviewsScreen({ navigation }) {
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <>
-                  <Ionicons
-                    name="checkmark-outline"
-                    size={17}
-                    color="#FFFFFF"
-                  />
+                  <Ionicons name="checkmark-outline" size={17} color="#FFFFFF" />
                   <Text style={styles.approveButtonText}>Approve</Text>
                 </>
               )}
@@ -403,13 +338,9 @@ export default function ReviewsScreen({ navigation }) {
           </View>
         ) : (
           <View style={styles.workflowNotice}>
-            <Ionicons
-              name="information-circle-outline"
-              size={16}
-              color="#1E56A0"
-            />
+            <Ionicons name="information-circle-outline" size={16} color="#1E56A0" />
             <Text style={styles.workflowNoticeText}>
-              This submission is currently {formatState(state)}.
+              This submission is currently {getStatusLabel(submission.state)}.
             </Text>
           </View>
         )}
@@ -441,8 +372,7 @@ export default function ReviewsScreen({ navigation }) {
       <View style={styles.summaryCard}>
         <Text style={styles.summaryTitle}>Supervisor Review Queue</Text>
         <Text style={styles.summaryText}>
-          Review submitted reports, approve valid submissions, or return them to
-          students for correction.
+          Review submitted reports, open uploaded files, approve valid submissions, or return them to students for correction.
         </Text>
       </View>
 
@@ -487,8 +417,7 @@ export default function ReviewsScreen({ navigation }) {
         }
       >
         <Text style={styles.count}>
-          {filteredSubmissions.length}{' '}
-          {filteredSubmissions.length === 1 ? 'review' : 'reviews'}
+          {filteredSubmissions.length} {filteredSubmissions.length === 1 ? 'review' : 'reviews'}
         </Text>
 
         {filteredSubmissions.length === 0
@@ -507,17 +436,13 @@ export default function ReviewsScreen({ navigation }) {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Return for Changes</Text>
 
-              <TouchableOpacity
-                onPress={closeReturnModal}
-                disabled={!!processingId}
-              >
+              <TouchableOpacity onPress={closeReturnModal} disabled={!!processingId}>
                 <Ionicons name="close" size={24} color="#0D1B2A" />
               </TouchableOpacity>
             </View>
 
             <Text style={styles.modalSubtitle}>
-              Add clear feedback for the student before returning this
-              submission.
+              Add clear feedback for the student before returning this submission.
             </Text>
 
             <TextInput
@@ -532,10 +457,7 @@ export default function ReviewsScreen({ navigation }) {
             />
 
             <TouchableOpacity
-              style={[
-                styles.modalReturnButton,
-                processingId && styles.disabledButton,
-              ]}
+              style={[styles.modalReturnButton, processingId && styles.disabledButton]}
               onPress={handleReturn}
               disabled={!!processingId}
             >
@@ -743,6 +665,24 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginTop: 2,
   },
+  openFileButton: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    minWidth: 66,
+    justifyContent: 'center',
+  },
+  openFileText: {
+    color: '#1E56A0',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -770,6 +710,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
+  detailButton: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  detailButtonText: {
+    color: '#1E56A0',
+    fontSize: 13,
+    fontWeight: '800',
+  },
   actionRow: {
     flexDirection: 'row',
     gap: 10,
@@ -784,7 +740,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    gap: 7,
+    gap: 6,
   },
   returnButtonText: {
     color: '#EF4444',
@@ -798,27 +754,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    gap: 7,
+    gap: 6,
   },
   approveButtonText: {
     color: '#FFFFFF',
     fontWeight: '800',
   },
+  disabledButton: {
+    opacity: 0.65,
+  },
   workflowNotice: {
     backgroundColor: '#EFF6FF',
     borderRadius: 10,
-    padding: 10,
-    borderLeftWidth: 3,
-    borderLeftColor: '#1E56A0',
+    padding: 11,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
+    gap: 8,
+    alignItems: 'flex-start',
   },
   workflowNoticeText: {
+    flex: 1,
     color: '#1E56A0',
     fontSize: 13,
     fontWeight: '600',
-    flex: 1,
+    lineHeight: 19,
   },
   modalOverlay: {
     flex: 1,
@@ -834,8 +792,8 @@ const styles = StyleSheet.create({
   },
   modalHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
   },
   modalTitle: {
     color: '#0D1B2A',
@@ -844,7 +802,8 @@ const styles = StyleSheet.create({
   },
   modalSubtitle: {
     color: '#6B7280',
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 19,
   },
   modalTextArea: {
     backgroundColor: '#F9FAFB',
@@ -855,11 +814,12 @@ const styles = StyleSheet.create({
     minHeight: 120,
     color: '#0D1B2A',
     fontSize: 14,
+    textAlignVertical: 'top',
   },
   modalReturnButton: {
     backgroundColor: '#EF4444',
     borderRadius: 12,
-    paddingVertical: 14,
+    padding: 15,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
@@ -867,10 +827,7 @@ const styles = StyleSheet.create({
   },
   modalReturnText: {
     color: '#FFFFFF',
-    fontWeight: '800',
     fontSize: 15,
-  },
-  disabledButton: {
-    opacity: 0.7,
+    fontWeight: '800',
   },
 });

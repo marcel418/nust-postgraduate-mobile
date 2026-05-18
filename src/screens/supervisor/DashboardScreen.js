@@ -1,55 +1,80 @@
+// src/screens/supervisor/DashboardScreen.js
+
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import AppHeader from '../../components/AppHeader';
-import { CURRENT_SUPERVISOR } from '../../data/mockData';
-import { getPendingSubmissions, getSupervisorStudents } from '../../services/api';
 
-const getStatusColor = (status) => {
-  switch (status) {
-    case 'Approved': return '#22C55E';
-    case 'In Progress': return '#7C3AED';
-    case 'In Review': return '#7C3AED';
-    case 'Pending': return '#F59E0B';
-    case 'Returned': return '#EF4444';
-    default: return '#6B7280';
-  }
-};
+import AppHeader from '../../components/AppHeader';
+import { submissionsApi } from '../../api/submissionsApi';
+import {
+  formatDate,
+  getInitials,
+  getProgressFromState,
+  getStatusColor,
+  getStatusLabel,
+  groupStudentsFromSubmissions,
+  normalizeSubmission,
+  SUPERVISOR_VISIBLE_STATES,
+} from './supervisorHelpers';
 
 export default function SupervisorDashboardScreen({ navigation }) {
-  const [students, setStudents] = useState([]);
-  const [pendingCount, setPendingCount] = useState(0);
-  const [thesisCount, setThesisCount] = useState(0);
+  const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadData = useCallback(async () => {
+    try {
+      const response = await submissionsApi.list();
+      const items = response?.data?.items || response?.items || [];
+
+      const visibleItems = items
+        .map(normalizeSubmission)
+        .filter((item) => SUPERVISOR_VISIBLE_STATES.includes(item.state))
+        .sort(
+          (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)
+        );
+
+      setSubmissions(visibleItems);
+    } catch (error) {
+      Alert.alert(
+        'Could not load dashboard',
+        error?.message || 'Please try again.'
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
-  const loadData = async () => {
-    try {
-      const [studentsData, pendingData] = await Promise.all([
-        getSupervisorStudents(CURRENT_SUPERVISOR.id),
-        getPendingSubmissions(CURRENT_SUPERVISOR.id),
-      ]);
-      setStudents(studentsData);
-      setPendingCount(pendingData.length);
-      // Thesis to grade = approved students
-      setThesisCount(
-        studentsData.filter((s) => s.status === 'Approved').length
-      );
-    } catch (error) {
-      console.error('Failed to load supervisor dashboard:', error);
-    } finally {
-      setLoading(false);
-    }
+  const students = useMemo(
+    () => groupStudentsFromSubmissions(submissions.map((item) => item.raw || item)),
+    [submissions]
+  );
+
+  const pendingCount = submissions.filter((item) => item.state === 'SUBMITTED').length;
+  const returnedCount = submissions.filter((item) => item.state === 'REVISIONS_REQUIRED').length;
+  const thesisCount = submissions.filter(
+    (item) => item.type === 'THESIS' && item.state === 'SUBMITTED'
+  ).length;
+
+  const recentSubmissions = submissions.slice(0, 5);
+
+  const refresh = () => {
+    setRefreshing(true);
+    loadData();
   };
 
   if (loading) {
@@ -64,31 +89,54 @@ export default function SupervisorDashboardScreen({ navigation }) {
     <View style={styles.container}>
       <AppHeader title={'Supervisor\nDashboard'} navigation={navigation} />
 
-      <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
-
-        {/* ── STATS ROW ── */}
+      <ScrollView
+        style={styles.body}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} />
+        }
+      >
         <View style={styles.statsRow}>
-          <View style={styles.statCard}>
+          <TouchableOpacity
+            style={styles.statCard}
+            onPress={() => navigation.navigate('Students')}
+          >
             <Text style={styles.statNumber}>{students.length}</Text>
             <Text style={styles.statLabel}>Students</Text>
-          </View>
-          <View style={styles.statCard}>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.statCard}
+            onPress={() => navigation.navigate('Reviews')}
+          >
             <Text style={styles.statNumber}>{pendingCount}</Text>
             <Text style={styles.statLabel}>Pending{'\n'}Reviews</Text>
-          </View>
-          <View style={styles.statCard}>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.statCard}
+            onPress={() => navigation.navigate('GradeThesis')}
+          >
             <Text style={styles.statNumber}>{thesisCount}</Text>
             <Text style={styles.statLabel}>Thesis to{'\n'}Grade</Text>
-          </View>
+          </TouchableOpacity>
         </View>
 
-        {/* ── ACTION BUTTONS ── */}
+        {returnedCount > 0 && (
+          <View style={styles.noticeCard}>
+            <Ionicons name="return-down-back-outline" size={20} color="#F59E0B" />
+            <Text style={styles.noticeText}>
+              {returnedCount} submission{returnedCount === 1 ? '' : 's'} currently require student revisions.
+            </Text>
+          </View>
+        )}
+
         <View style={styles.actionsRow}>
           <TouchableOpacity
             style={styles.actionBtn}
             onPress={() => navigation.navigate('Reviews')}
           >
-            <Ionicons name="bar-chart-outline" size={28} color="#FFFFFF" />
+            <Ionicons name="document-text-outline" size={28} color="#FFFFFF" />
             <Text style={styles.actionText}>Review{'\n'}Reports</Text>
           </TouchableOpacity>
 
@@ -96,8 +144,8 @@ export default function SupervisorDashboardScreen({ navigation }) {
             style={styles.actionBtn}
             onPress={() => navigation.navigate('SubmitDocuments')}
           >
-            <Ionicons name="document-text-outline" size={28} color="#FFFFFF" />
-            <Text style={styles.actionText}>Submit{'\n'}Thesis</Text>
+            <Ionicons name="cloud-upload-outline" size={28} color="#FFFFFF" />
+            <Text style={styles.actionText}>Submit{'\n'}Documents</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -109,48 +157,67 @@ export default function SupervisorDashboardScreen({ navigation }) {
           </TouchableOpacity>
         </View>
 
-        {/* ── STUDENT LIST ── */}
-        {students.map((student) => (
-          <View key={student.id} style={styles.studentCard}>
-            <View style={styles.studentInfo}>
-              <Text style={styles.studentName}>{student.name}</Text>
-              <Text style={styles.studentCourse}>{student.course}</Text>
+        <Text style={styles.sectionTitle}>Recent Submissions</Text>
 
-              {/* Progress bar */}
-              <View style={styles.progressBarBg}>
+        {recentSubmissions.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="folder-open-outline" size={42} color="#9BA4B5" />
+            <Text style={styles.emptyTitle}>No submissions available</Text>
+            <Text style={styles.emptyText}>
+              Student submissions assigned to the supervisor will appear here.
+            </Text>
+          </View>
+        ) : (
+          recentSubmissions.map((submission) => (
+            <View key={submission.id} style={styles.submissionCard}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>
+                  {getInitials(submission.student.name)}
+                </Text>
+              </View>
+
+              <View style={styles.studentInfo}>
+                <Text style={styles.studentName}>{submission.student.name}</Text>
+                <Text style={styles.studentCourse} numberOfLines={1}>
+                  {submission.typeLabel} · {formatDate(submission.updatedAt)}
+                </Text>
+
+                <View style={styles.progressBarBg}>
+                  <View
+                    style={[
+                      styles.progressBarFill,
+                      { width: `${getProgressFromState(submission.state)}%` },
+                    ]}
+                  >
+                    <Text style={styles.progressPill}>
+                      {getProgressFromState(submission.state)}%
+                    </Text>
+                  </View>
+                </View>
+
                 <View
                   style={[
-                    styles.progressBarFill,
-                    { width: `${student.progressPercentage}%` },
+                    styles.statusBadge,
+                    { backgroundColor: getStatusColor(submission.state) },
                   ]}
                 >
-                  <Text style={styles.progressPill}>
-                    {student.progressPercentage}%
+                  <Text style={styles.statusBadgeText}>
+                    {getStatusLabel(submission.state)}
                   </Text>
                 </View>
               </View>
 
-              <View
-                style={[
-                  styles.statusBadge,
-                  { backgroundColor: getStatusColor(student.status) },
-                ]}
+              <TouchableOpacity
+                style={styles.viewBtn}
+                onPress={() =>
+                  navigation.navigate('ReviewReport', { submission })
+                }
               >
-                <Text style={styles.statusBadgeText}>{student.status}</Text>
-              </View>
+                <Text style={styles.viewBtnText}>View</Text>
+              </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              style={styles.viewBtn}
-              onPress={() =>
-                navigation.navigate('ReviewReport', { student })
-              }
-            >
-              <Text style={styles.viewBtnText}>View</Text>
-            </TouchableOpacity>
-          </View>
-        ))}
-
+          ))
+        )}
       </ScrollView>
     </View>
   );
@@ -169,7 +236,6 @@ const styles = StyleSheet.create({
   },
   body: {
     padding: 16,
-    gap: 16,
   },
   statsRow: {
     flexDirection: 'row',
@@ -194,10 +260,28 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     textAlign: 'center',
   },
+  noticeCard: {
+    backgroundColor: '#FFFBEB',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  noticeText: {
+    flex: 1,
+    color: '#92400E',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 19,
+  },
   actionsRow: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 16,
+    marginBottom: 18,
   },
   actionBtn: {
     flex: 1,
@@ -213,7 +297,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
-  studentCard: {
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#0D1B2A',
+    marginBottom: 10,
+  },
+  submissionCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 16,
@@ -221,6 +311,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#1E56A0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   studentInfo: {
     flex: 1,
@@ -263,18 +366,35 @@ const styles = StyleSheet.create({
   },
   statusBadgeText: {
     color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
   },
   viewBtn: {
     backgroundColor: '#1E56A0',
     borderRadius: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   viewBtnText: {
     color: '#FFFFFF',
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: 13,
+  },
+  emptyCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 26,
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyTitle: {
+    color: '#0D1B2A',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  emptyText: {
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });

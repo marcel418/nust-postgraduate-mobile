@@ -18,38 +18,24 @@ import {
 
 import AppHeader from '../../components/AppHeader';
 import { api } from '../../api/http';
+import { documentsApi } from '../../api/documentsApi';
+import {
+  formatDate,
+  formatLabel,
+  getStatusColor,
+  getStatusLabel,
+  normalizeSubmission,
+  sortNewestFirst,
+} from './studentHelpers';
 
-const REPORTING_PERIODS = ['Today', 'This Week', 'This Month', 'Last 30 Days'];
+const REPORTING_PERIODS = ['Today', 'This Week', 'This Month', 'Last 30 Days', 'Semester', 'Final Submission'];
 
-const getStatusColor = (status) => {
-  switch (status) {
-    case 'APPROVED':
-      return '#22C55E';
-    case 'SUBMITTED':
-      return '#7C3AED';
-    case 'REVISIONS_REQUIRED':
-      return '#F59E0B';
-    case 'REJECTED':
-      return '#EF4444';
-    case 'DRAFT':
-      return '#6B7280';
-    default:
-      return '#6B7280';
-  }
-};
+const SUBMISSION_TYPES = [
+  { label: 'Progress Report', value: 'PROGRESS_REPORT' },
+  { label: 'Thesis', value: 'THESIS' },
+];
 
-const getStatusLabel = (status) => {
-  if (!status) return 'Unknown';
-
-  if (status === 'SUBMITTED') return 'In Review';
-
-  return String(status)
-    .replace(/_/g, ' ')
-    .toLowerCase()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-};
-
-const formatFileSize = (bytes) => {
+function formatFileSize(bytes) {
   if (!bytes) return 'Unknown size';
 
   const mb = bytes / (1024 * 1024);
@@ -59,53 +45,7 @@ const formatFileSize = (bytes) => {
   }
 
   return `${(bytes / 1024).toFixed(1)} KB`;
-};
-
-const formatDate = (dateStr) => {
-  if (!dateStr) return 'N/A';
-
-  try {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-  } catch {
-    return 'N/A';
-  }
-};
-
-const parseDescription = (description) => {
-  if (!description) {
-    return {
-      comments: '',
-      reportingPeriod: 'N/A',
-      fileName: '',
-      fileSize: '',
-      documentId: null,
-    };
-  }
-
-  try {
-    const parsed = JSON.parse(description);
-
-    return {
-      comments: parsed.comments || '',
-      reportingPeriod: parsed.reportingPeriod || 'N/A',
-      fileName: parsed.fileName || '',
-      fileSize: parsed.fileSize || '',
-      documentId: parsed.documentId || null,
-    };
-  } catch {
-    return {
-      comments: description,
-      reportingPeriod: 'N/A',
-      fileName: '',
-      fileSize: '',
-      documentId: null,
-    };
-  }
-};
+}
 
 export default function SubmissionsScreen({ navigation }) {
   const [submissions, setSubmissions] = useState([]);
@@ -114,10 +54,13 @@ export default function SubmissionsScreen({ navigation }) {
 
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [openingDocumentId, setOpeningDocumentId] = useState(null);
 
+  const [selectedType, setSelectedType] = useState(SUBMISSION_TYPES[0]);
+  const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState('');
-  const [comments, setComments] = useState('');
   const [periodDropdownOpen, setPeriodDropdownOpen] = useState(false);
+  const [comments, setComments] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
 
   const submissionCountText = useMemo(() => {
@@ -128,20 +71,10 @@ export default function SubmissionsScreen({ navigation }) {
   const loadSubmissions = useCallback(async () => {
     try {
       const response = await api.get('/submissions');
-      const items = response?.data?.items || [];
-
-      const sorted = [...items].sort(
-        (a, b) =>
-          new Date(b.created_at || b.updated_at || 0) -
-          new Date(a.created_at || a.updated_at || 0)
-      );
-
-      setSubmissions(sorted);
+      const items = response?.data?.items || response?.items || [];
+      setSubmissions(sortNewestFirst(items.map(normalizeSubmission)));
     } catch (error) {
-      Alert.alert(
-        'Could not load submissions',
-        error?.message || 'Please try again.'
-      );
+      Alert.alert('Could not load submissions', error?.message || 'Please try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -152,16 +85,18 @@ export default function SubmissionsScreen({ navigation }) {
     loadSubmissions();
   }, [loadSubmissions]);
 
-  const handleRefresh = () => {
-    setRefreshing(true);
-    loadSubmissions();
-  };
-
   const resetForm = () => {
+    setSelectedType(SUBMISSION_TYPES[0]);
     setSelectedPeriod('');
     setComments('');
     setSelectedFile(null);
     setPeriodDropdownOpen(false);
+    setTypeDropdownOpen(false);
+  };
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadSubmissions();
   };
 
   const handlePickFile = async () => {
@@ -184,6 +119,13 @@ export default function SubmissionsScreen({ navigation }) {
         return;
       }
 
+      const lowerName = String(file.name || '').toLowerCase();
+
+      if (!lowerName.endsWith('.pdf') && !lowerName.endsWith('.docx')) {
+        Alert.alert('Unsupported File', 'Only PDF and DOCX files are allowed.');
+        return;
+      }
+
       setSelectedFile({
         name: file.name,
         size: file.size || 0,
@@ -192,7 +134,7 @@ export default function SubmissionsScreen({ navigation }) {
         mimeType: file.mimeType || 'application/octet-stream',
       });
     } catch (error) {
-      Alert.alert('Error', 'Could not open file picker.');
+      Alert.alert('Error', error?.message || 'Could not open file picker.');
     }
   };
 
@@ -204,7 +146,7 @@ export default function SubmissionsScreen({ navigation }) {
     formData.append('file', {
       uri: selectedFile.uri,
       name: selectedFile.name,
-      type: selectedFile.mimeType,
+      type: selectedFile.mimeType || 'application/octet-stream',
     });
 
     const response = await api.post('/documents/upload', formData, {
@@ -213,10 +155,10 @@ export default function SubmissionsScreen({ navigation }) {
       },
     });
 
-    return response?.data?.document || null;
+    return response?.data?.document || response?.document || null;
   };
 
-  const createAndSubmitProgressReport = async ({ document }) => {
+  const createAndSubmit = async ({ document }) => {
     const descriptionPayload = {
       reportingPeriod: selectedPeriod,
       comments: comments.trim(),
@@ -227,12 +169,12 @@ export default function SubmissionsScreen({ navigation }) {
     };
 
     const createResponse = await api.post('/submissions', {
-      submission_type: 'PROGRESS_REPORT',
-      title: selectedFile?.name || 'Progress Report',
+      submission_type: selectedType.value,
+      title: selectedFile?.name || selectedType.label,
       description: JSON.stringify(descriptionPayload),
     });
 
-    const submission = createResponse?.data?.submission;
+    const submission = createResponse?.data?.submission || createResponse?.submission;
 
     if (!submission?.id) {
       throw new Error('Submission was created, but no submission ID was returned.');
@@ -244,6 +186,11 @@ export default function SubmissionsScreen({ navigation }) {
   };
 
   const handleSubmit = async () => {
+    if (!selectedType?.value) {
+      Alert.alert('Missing Field', 'Please select a submission type.');
+      return;
+    }
+
     if (!selectedPeriod) {
       Alert.alert('Missing Field', 'Please select a reporting period.');
       return;
@@ -258,24 +205,33 @@ export default function SubmissionsScreen({ navigation }) {
 
     try {
       const document = await uploadDocument();
-
-      await createAndSubmitProgressReport({
-        document,
-      });
+      await createAndSubmit({ document });
 
       resetForm();
       setUploadModalVisible(false);
-
       await loadSubmissions();
 
-      Alert.alert('Success', 'Progress report submitted successfully.');
+      Alert.alert('Success', `${selectedType.label} submitted successfully.`);
     } catch (error) {
-      Alert.alert(
-        'Submission Failed',
-        error?.message || 'Failed to submit. Please try again.'
-      );
+      Alert.alert('Submission Failed', error?.message || 'Failed to submit. Please try again.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleOpenDocument = async (documentId, fileName) => {
+    if (!documentId) {
+      Alert.alert('No Document', 'This submission does not have a linked uploaded document.');
+      return;
+    }
+
+    try {
+      setOpeningDocumentId(documentId);
+      await documentsApi.openDocument(documentId, fileName || 'document');
+    } catch (error) {
+      Alert.alert('Could not open document', error?.message || 'Please try again.');
+    } finally {
+      setOpeningDocumentId(null);
     }
   };
 
@@ -286,26 +242,17 @@ export default function SubmissionsScreen({ navigation }) {
       </View>
 
       <Text style={styles.emptyTitle}>No submissions yet</Text>
-      <Text style={styles.emptyText}>
-        Upload your first progress report to start the workflow.
-      </Text>
+      <Text style={styles.emptyText}>Upload your first progress report or thesis to start the workflow.</Text>
 
-      <TouchableOpacity
-        style={styles.emptyButton}
-        onPress={() => setUploadModalVisible(true)}
-      >
+      <TouchableOpacity style={styles.emptyButton} onPress={() => setUploadModalVisible(true)}>
         <Ionicons name="add" size={18} color="#FFFFFF" />
-        <Text style={styles.emptyButtonText}>Upload Report</Text>
+        <Text style={styles.emptyButtonText}>Upload File</Text>
       </TouchableOpacity>
     </View>
   );
 
   const renderSubmissionCard = (item) => {
-    const details = parseDescription(item.description);
-    const status = item.current_state || item.workflow_state || 'DRAFT';
-    const statusColor = getStatusColor(status);
-    const displayFileName = details.fileName || item.title || 'Progress Report';
-    const displayFileSize = details.fileSize || 'Metadata saved';
+    const isOpening = openingDocumentId === item.documentId;
 
     return (
       <View key={item.id} style={styles.card}>
@@ -315,56 +262,54 @@ export default function SubmissionsScreen({ navigation }) {
           </View>
 
           <View style={styles.fileInfo}>
-            <Text style={styles.fileName} numberOfLines={1}>
-              {displayFileName}
-            </Text>
-
-            <Text style={styles.fileMeta}>
-              {displayFileSize} · {formatDate(item.created_at)}
-            </Text>
+            <Text style={styles.fileName} numberOfLines={1}>{item.fileName}</Text>
+            <Text style={styles.fileMeta}>{item.fileSize} · {formatDate(item.createdAt)}</Text>
           </View>
 
-          <View
-            style={[
-              styles.statusBadge,
-              {
-                backgroundColor: statusColor,
-              },
-            ]}
-          >
-            <Text style={styles.statusText}>{getStatusLabel(status)}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.state) }]}>
+            <Text style={styles.statusText}>{getStatusLabel(item.state)}</Text>
           </View>
+        </View>
+
+        <View style={styles.detailRow}>
+          <Ionicons name="document-outline" size={14} color="#6B7280" />
+          <Text style={styles.detailText}>Type: {formatLabel(item.type)}</Text>
         </View>
 
         <View style={styles.detailRow}>
           <Ionicons name="calendar-outline" size={14} color="#6B7280" />
-          <Text style={styles.detailText}>
-            Period: {details.reportingPeriod || 'N/A'}
-          </Text>
+          <Text style={styles.detailText}>Period: {item.reportingPeriod}</Text>
         </View>
 
         <View style={styles.detailRow}>
           <Ionicons name="layers-outline" size={14} color="#6B7280" />
-          <Text style={styles.detailText}>
-            Version: {item.current_version_no || 1}
-          </Text>
+          <Text style={styles.detailText}>Version: {item.versionNo}</Text>
         </View>
 
-        {!!details.comments && (
+        {!!item.comments && (
           <View style={styles.detailRow}>
             <Ionicons name="chatbubble-outline" size={14} color="#6B7280" />
-            <Text style={styles.detailText} numberOfLines={2}>
-              {details.comments}
-            </Text>
+            <Text style={styles.detailText} numberOfLines={2}>{item.comments}</Text>
           </View>
         )}
 
-        {status !== 'DRAFT' && (
+        <TouchableOpacity
+          style={[styles.openDocumentBtn, !item.documentId && styles.disabledOpenDocumentBtn]}
+          onPress={() => handleOpenDocument(item.documentId, item.fileName)}
+          disabled={!item.documentId || isOpening}
+        >
+          {isOpening ? (
+            <ActivityIndicator size="small" color="#1E56A0" />
+          ) : (
+            <Ionicons name={item.documentId ? 'open-outline' : 'ban-outline'} size={16} color="#1E56A0" />
+          )}
+          <Text style={styles.openDocumentText}>{item.documentId ? 'Open Uploaded File' : 'No Uploaded File'}</Text>
+        </TouchableOpacity>
+
+        {item.state !== 'DRAFT' && (
           <View style={styles.workflowNotice}>
             <Ionicons name="lock-closed-outline" size={14} color="#1E56A0" />
-            <Text style={styles.workflowNoticeText}>
-              This submission is now in workflow.
-            </Text>
+            <Text style={styles.workflowNoticeText}>This submission is now in workflow.</Text>
           </View>
         )}
       </View>
@@ -386,10 +331,7 @@ export default function SubmissionsScreen({ navigation }) {
         title="Submissions"
         navigation={navigation}
         rightAction={
-          <TouchableOpacity
-            style={styles.uploadBtn}
-            onPress={() => setUploadModalVisible(true)}
-          >
+          <TouchableOpacity style={styles.uploadBtn} onPress={() => setUploadModalVisible(true)}>
             <Ionicons name="add" size={20} color="#FFFFFF" />
             <Text style={styles.uploadBtnText}>Upload</Text>
           </TouchableOpacity>
@@ -398,111 +340,80 @@ export default function SubmissionsScreen({ navigation }) {
 
       <ScrollView
         style={styles.body}
-        contentContainerStyle={[
-          styles.bodyContent,
-          submissions.length === 0 && styles.emptyBodyContent,
-        ]}
+        contentContainerStyle={[styles.bodyContent, submissions.length === 0 && styles.emptyBodyContent]}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
         <Text style={styles.count}>{submissionCountText}</Text>
-
-        {submissions.length === 0
-          ? renderEmptyState()
-          : submissions.map(renderSubmissionCard)}
+        {submissions.length === 0 ? renderEmptyState() : submissions.map(renderSubmissionCard)}
       </ScrollView>
 
       <Modal
         visible={uploadModalVisible}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => {
-          if (!submitting) {
-            setUploadModalVisible(false);
-          }
-        }}
+        onRequestClose={() => !submitting && setUploadModalVisible(false)}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <TouchableOpacity
-              onPress={() => {
-                if (!submitting) {
-                  setUploadModalVisible(false);
-                }
-              }}
-              disabled={submitting}
-            >
+            <TouchableOpacity onPress={() => !submitting && setUploadModalVisible(false)} disabled={submitting}>
               <Ionicons name="close" size={24} color="#FFFFFF" />
             </TouchableOpacity>
 
-            <Text style={styles.modalTitle}>Upload Progress Report</Text>
-
+            <Text style={styles.modalTitle}>Upload Submission</Text>
             <View style={{ width: 24 }} />
           </View>
 
-          <ScrollView
-            style={styles.modalBody}
-            contentContainerStyle={styles.modalBodyContent}
-            showsVerticalScrollIndicator={false}
-          >
-            <TouchableOpacity
-              style={styles.fileUploadArea}
-              onPress={handlePickFile}
-              disabled={submitting}
-            >
+          <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} showsVerticalScrollIndicator={false}>
+            <TouchableOpacity style={styles.fileUploadArea} onPress={handlePickFile} disabled={submitting}>
               {selectedFile ? (
                 <View style={styles.selectedFileRow}>
                   <Ionicons name="document-text" size={32} color="#1E56A0" />
-
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.selectedFileName} numberOfLines={2}>
-                      {selectedFile.name}
-                    </Text>
-                    <Text style={styles.selectedFileSize}>
-                      {selectedFile.sizeLabel}
-                    </Text>
+                    <Text style={styles.selectedFileName} numberOfLines={2}>{selectedFile.name}</Text>
+                    <Text style={styles.selectedFileSize}>{selectedFile.sizeLabel}</Text>
                   </View>
-
-                  <TouchableOpacity
-                    onPress={() => setSelectedFile(null)}
-                    disabled={submitting}
-                  >
+                  <TouchableOpacity onPress={() => setSelectedFile(null)} disabled={submitting}>
                     <Ionicons name="close-circle" size={22} color="#EF4444" />
                   </TouchableOpacity>
                 </View>
               ) : (
                 <>
                   <Ionicons name="cloud-upload-outline" size={42} color="#6B7280" />
-                  <Text style={styles.uploadAreaText}>
-                    Tap to upload file: PDF/DOCX only
-                  </Text>
+                  <Text style={styles.uploadAreaText}>Tap to upload file: PDF/DOCX only</Text>
                 </>
               )}
             </TouchableOpacity>
 
+            <Text style={styles.fieldLabel}>Submission Type</Text>
+            <TouchableOpacity style={styles.dropdown} onPress={() => setTypeDropdownOpen(!typeDropdownOpen)} disabled={submitting}>
+              <Text style={styles.dropdownText}>{selectedType?.label || 'Select'}</Text>
+              <Ionicons name={typeDropdownOpen ? 'chevron-up' : 'chevron-down'} size={20} color="#6B7280" />
+            </TouchableOpacity>
+
+            {typeDropdownOpen && (
+              <View style={styles.dropdownOptions}>
+                {SUBMISSION_TYPES.map((type) => (
+                  <TouchableOpacity
+                    key={type.value}
+                    style={styles.dropdownOption}
+                    onPress={() => {
+                      setSelectedType(type);
+                      setTypeDropdownOpen(false);
+                    }}
+                    disabled={submitting}
+                  >
+                    <Text style={styles.dropdownOptionText}>{type.label}</Text>
+                    {selectedType?.value === type.value && <Ionicons name="checkmark" size={16} color="#1E56A0" />}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
             <Text style={styles.fieldLabel}>Reporting Period</Text>
-
-            <TouchableOpacity
-              style={styles.dropdown}
-              onPress={() => setPeriodDropdownOpen(!periodDropdownOpen)}
-              disabled={submitting}
-            >
-              <Text
-                style={[
-                  styles.dropdownText,
-                  !selectedPeriod && { color: '#9BA4B5' },
-                ]}
-              >
-                {selectedPeriod || 'Select'}
-              </Text>
-
-              <Ionicons
-                name={periodDropdownOpen ? 'chevron-up' : 'chevron-down'}
-                size={20}
-                color="#6B7280"
-              />
+            <TouchableOpacity style={styles.dropdown} onPress={() => setPeriodDropdownOpen(!periodDropdownOpen)} disabled={submitting}>
+              <Text style={[styles.dropdownText, !selectedPeriod && { color: '#9BA4B5' }]}>{selectedPeriod || 'Select'}</Text>
+              <Ionicons name={periodDropdownOpen ? 'chevron-up' : 'chevron-down'} size={20} color="#6B7280" />
             </TouchableOpacity>
 
             {periodDropdownOpen && (
@@ -518,17 +429,13 @@ export default function SubmissionsScreen({ navigation }) {
                     disabled={submitting}
                   >
                     <Text style={styles.dropdownOptionText}>{period}</Text>
-
-                    {selectedPeriod === period && (
-                      <Ionicons name="checkmark" size={16} color="#1E56A0" />
-                    )}
+                    {selectedPeriod === period && <Ionicons name="checkmark" size={16} color="#1E56A0" />}
                   </TouchableOpacity>
                 ))}
               </View>
             )}
 
             <Text style={styles.fieldLabel}>Comments</Text>
-
             <TextInput
               style={styles.textArea}
               placeholder="Type here..."
@@ -541,11 +448,7 @@ export default function SubmissionsScreen({ navigation }) {
               editable={!submitting}
             />
 
-            <TouchableOpacity
-              style={[styles.submitBtn, submitting && styles.disabledButton]}
-              onPress={handleSubmit}
-              disabled={submitting}
-            >
+            <TouchableOpacity style={[styles.submitBtn, submitting && styles.disabledButton]} onPress={handleSubmit} disabled={submitting}>
               {submitting ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
@@ -563,287 +466,54 @@ export default function SubmissionsScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F0F2F5',
-    gap: 10,
-  },
-  loadingText: {
-    color: '#6B7280',
-    fontSize: 14,
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#F0F2F5',
-  },
-  uploadBtn: {
-    backgroundColor: '#1E56A0',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  uploadBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  body: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  bodyContent: {
-    paddingTop: 16,
-    paddingBottom: 32,
-  },
-  emptyBodyContent: {
-    flexGrow: 1,
-  },
-  count: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginBottom: 12,
-  },
-  emptyState: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 36,
-  },
-  emptyIcon: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: '#EFF6FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
-  },
-  emptyTitle: {
-    color: '#0D1B2A',
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  emptyText: {
-    color: '#6B7280',
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 18,
-  },
-  emptyButton: {
-    backgroundColor: '#1E56A0',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 10,
-  },
-  emptyButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    gap: 10,
-  },
-  fileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  fileIcon: {
-    width: 44,
-    height: 44,
-    backgroundColor: '#EFF6FF',
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fileInfo: {
-    flex: 1,
-  },
-  fileName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#0D1B2A',
-  },
-  fileMeta: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 2,
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-  },
-  statusText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-  },
-  detailText: {
-    fontSize: 13,
-    color: '#6B7280',
-    flex: 1,
-  },
-  workflowNotice: {
-    backgroundColor: '#EFF6FF',
-    borderRadius: 8,
-    padding: 10,
-    borderLeftWidth: 3,
-    borderLeftColor: '#1E56A0',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  workflowNoticeText: {
-    fontSize: 13,
-    color: '#1E56A0',
-    flex: 1,
-    fontWeight: '600',
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#F0F2F5',
-  },
-  modalHeader: {
-    backgroundColor: '#0D1B2A',
-    paddingTop: 56,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    flex: 1,
-    marginLeft: 12,
-  },
-  modalBody: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  modalBodyContent: {
-    paddingTop: 16,
-    paddingBottom: 32,
-  },
-  fileUploadArea: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderStyle: 'dashed',
-    padding: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-    gap: 12,
-  },
-  uploadAreaText: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  selectedFileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    width: '100%',
-  },
-  selectedFileName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#0D1B2A',
-  },
-  selectedFileSize: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 2,
-  },
-  fieldLabel: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#0D1B2A',
-    marginBottom: 8,
-  },
-  dropdown: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    padding: 14,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  dropdownText: {
-    fontSize: 15,
-    color: '#0D1B2A',
-  },
-  dropdownOptions: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    marginBottom: 16,
-    overflow: 'hidden',
-  },
-  dropdownOption: {
-    padding: 14,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  dropdownOptionText: {
-    fontSize: 15,
-    color: '#374151',
-  },
-  textArea: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 15,
-    color: '#0D1B2A',
-    minHeight: 120,
-    marginBottom: 20,
-  },
-  submitBtn: {
-    backgroundColor: '#1E56A0',
-    borderRadius: 30,
-    padding: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 32,
-    marginHorizontal: 40,
-    flexDirection: 'row',
-    gap: 8,
-  },
-  submitBtnText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  disabledButton: {
-    opacity: 0.7,
-  },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0F2F5', gap: 10 },
+  loadingText: { color: '#6B7280', fontSize: 14 },
+  container: { flex: 1, backgroundColor: '#F0F2F5' },
+  uploadBtn: { backgroundColor: '#1E56A0', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
+  uploadBtnText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 },
+  body: { flex: 1, paddingHorizontal: 16 },
+  bodyContent: { paddingTop: 16, paddingBottom: 32 },
+  emptyBodyContent: { flexGrow: 1 },
+  count: { fontSize: 13, color: '#6B7280', marginBottom: 12 },
+  emptyState: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, alignItems: 'center', justifyContent: 'center', marginTop: 36 },
+  emptyIcon: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  emptyTitle: { color: '#0D1B2A', fontSize: 18, fontWeight: '700', marginBottom: 6 },
+  emptyText: { color: '#6B7280', fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 18 },
+  emptyButton: { backgroundColor: '#1E56A0', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10 },
+  emptyButtonText: { color: '#FFFFFF', fontWeight: '700' },
+  card: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 12, gap: 10 },
+  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  fileIcon: { width: 44, height: 44, backgroundColor: '#EFF6FF', borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  fileInfo: { flex: 1 },
+  fileName: { fontSize: 14, fontWeight: '600', color: '#0D1B2A' },
+  fileMeta: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, alignSelf: 'flex-start' },
+  statusText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  detailRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  detailText: { fontSize: 13, color: '#6B7280', flex: 1 },
+  openDocumentBtn: { backgroundColor: '#EFF6FF', borderRadius: 10, paddingVertical: 11, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: '#BFDBFE' },
+  disabledOpenDocumentBtn: { opacity: 0.6 },
+  openDocumentText: { color: '#1E56A0', fontSize: 13, fontWeight: '700' },
+  workflowNotice: { backgroundColor: '#EFF6FF', borderRadius: 8, padding: 10, borderLeftWidth: 3, borderLeftColor: '#1E56A0', flexDirection: 'row', alignItems: 'center', gap: 6 },
+  workflowNoticeText: { fontSize: 13, color: '#1E56A0', flex: 1, fontWeight: '600' },
+  modalContainer: { flex: 1, backgroundColor: '#F0F2F5' },
+  modalHeader: { backgroundColor: '#0D1B2A', paddingTop: 56, paddingBottom: 20, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFFFFF', flex: 1, marginLeft: 12 },
+  modalBody: { flex: 1, paddingHorizontal: 16 },
+  modalBodyContent: { paddingTop: 16, paddingBottom: 32 },
+  fileUploadArea: { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB', borderStyle: 'dashed', padding: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 20, gap: 12 },
+  uploadAreaText: { fontSize: 14, color: '#6B7280', textAlign: 'center' },
+  selectedFileRow: { flexDirection: 'row', alignItems: 'center', gap: 12, width: '100%' },
+  selectedFileName: { fontSize: 14, fontWeight: '600', color: '#0D1B2A' },
+  selectedFileSize: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  fieldLabel: { fontSize: 15, fontWeight: '600', color: '#0D1B2A', marginBottom: 8 },
+  dropdown: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  dropdownText: { fontSize: 15, color: '#0D1B2A' },
+  dropdownOptions: { backgroundColor: '#FFFFFF', borderRadius: 10, marginBottom: 16, overflow: 'hidden' },
+  dropdownOption: { padding: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  dropdownOptionText: { fontSize: 15, color: '#374151' },
+  textArea: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 14, fontSize: 15, color: '#0D1B2A', minHeight: 120, marginBottom: 20 },
+  submitBtn: { backgroundColor: '#1E56A0', borderRadius: 30, padding: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 32, marginHorizontal: 40, flexDirection: 'row', gap: 8 },
+  submitBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  disabledButton: { opacity: 0.7 },
 });

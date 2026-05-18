@@ -14,12 +14,24 @@ import {
 } from 'react-native';
 
 import HODHeader from '../../components/HODHeader';
+import { api } from '../../api/http';
+import { documentsApi } from '../../api/documentsApi';
 import { usersApi } from '../../api/usersApi';
 import { submissionsApi } from '../../api/submissionsApi';
 
 const MONTHS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];
 
 const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
@@ -54,6 +66,7 @@ function parseDescription(description) {
       reportingPeriod: 'N/A',
       fileName: '',
       fileSize: '',
+      documentId: null,
     };
   }
 
@@ -65,6 +78,7 @@ function parseDescription(description) {
       reportingPeriod: parsed.reportingPeriod || 'N/A',
       fileName: parsed.fileName || '',
       fileSize: parsed.fileSize || '',
+      documentId: parsed.documentId || parsed.document_id || null,
     };
   } catch {
     return {
@@ -72,6 +86,7 @@ function parseDescription(description) {
       reportingPeriod: 'N/A',
       fileName: '',
       fileSize: '',
+      documentId: null,
     };
   }
 }
@@ -79,7 +94,7 @@ function parseDescription(description) {
 function getInitials(name) {
   if (!name) return '?';
 
-  return name
+  return String(name)
     .split(' ')
     .filter(Boolean)
     .map((word) => word[0])
@@ -111,6 +126,7 @@ function normalizeSubmission(submission = {}) {
     state,
     document: details.fileName || submission.document || submission.title || 'Attached document',
     documentSize: details.fileSize || submission.documentSize || 'Metadata saved',
+    documentId: details.documentId || submission.documentId || submission.document_id || null,
     reportingPeriod: details.reportingPeriod || submission.reportingPeriod || 'N/A',
     comments: details.comments || submission.comments || '',
     studentName:
@@ -123,11 +139,7 @@ function normalizeSubmission(submission = {}) {
       submission.student_course ||
       submission.course ||
       'Postgraduate Programme',
-    updatedAt:
-      submission.updated_at ||
-      submission.created_at ||
-      submission.deadline ||
-      null,
+    updatedAt: submission.updated_at || submission.created_at || submission.deadline || null,
   };
 }
 
@@ -232,40 +244,86 @@ function CalendarPicker({ selectedDate, onSelectDate }) {
   );
 }
 
+async function forwardToFPGCR(submissionId, comments) {
+  return api.post(`/submissions/${submissionId}/hod/forward-fpgcr`, {
+    comments,
+  });
+}
+
+function DocumentSummaryCard({ submission, onOpenDocument, openingDocument, onReview }) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.docRow}>
+        <View style={styles.docIconBox}>
+          <Ionicons name="document-attach-outline" size={22} color="#1E56A0" />
+        </View>
+
+        <View style={styles.docInfo}>
+          <Text style={styles.docName} numberOfLines={2}>
+            {submission.document}
+          </Text>
+          <Text style={styles.docSize}>
+            {submission.documentSize} · {submission.type}
+          </Text>
+          <Text style={styles.docSize}>Status: {formatLabel(submission.state)}</Text>
+        </View>
+      </View>
+
+      <View style={styles.docButtonRow}>
+        <TouchableOpacity
+          style={[styles.openBtn, (!submission.documentId || openingDocument) && styles.disabled]}
+          onPress={onOpenDocument}
+          disabled={!submission.documentId || openingDocument}
+        >
+          {openingDocument ? (
+            <ActivityIndicator color="#FFFFFF" size="small" />
+          ) : (
+            <Text style={styles.openBtnText}>{submission.documentId ? 'Open File' : 'No File'}</Text>
+          )}
+        </TouchableOpacity>
+
+        {onReview ? (
+          <TouchableOpacity style={styles.reviewBtn} onPress={onReview}>
+            <Text style={styles.reviewBtnText}>Review</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      {!!submission.comments && (
+        <View style={styles.commentsBox}>
+          <Text style={styles.commentsLabel}>Student comments</Text>
+          <Text style={styles.commentsText}>{submission.comments}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
 export function HODAssignInternalEvaluatorScreen({ route, navigation }) {
   const submission = route?.params?.submission || {};
-  const normalizedSubmission = useMemo(
-    () => normalizeSubmission(submission),
-    [submission]
-  );
+  const normalizedSubmission = useMemo(() => normalizeSubmission(submission), [submission]);
 
   const [evaluators, setEvaluators] = useState([]);
   const [selectedEvaluator, setSelectedEvaluator] = useState(null);
   const [showList, setShowList] = useState(false);
-
   const [deadline, setDeadline] = useState(null);
   const [comments, setComments] = useState('Assigned for internal evaluation.');
-
   const [loading, setLoading] = useState(true);
   const [assigning, setAssigning] = useState(false);
+  const [openingDocument, setOpeningDocument] = useState(false);
 
   const loadEvaluators = useCallback(async () => {
     try {
       setLoading(true);
-
       const response = await usersApi.listByRole('INTERNAL_EVALUATOR');
       const items = response?.data?.items || response?.items || [];
-
       setEvaluators(items);
 
       if (!selectedEvaluator && items.length > 0) {
         setSelectedEvaluator(items[0]);
       }
     } catch (error) {
-      Alert.alert(
-        'Could not load evaluators',
-        error?.message || 'Please try again.'
-      );
+      Alert.alert('Could not load evaluators', error?.message || 'Please try again.');
     } finally {
       setLoading(false);
     }
@@ -274,6 +332,22 @@ export function HODAssignInternalEvaluatorScreen({ route, navigation }) {
   useEffect(() => {
     loadEvaluators();
   }, [loadEvaluators]);
+
+  const handleOpenDocument = async () => {
+    if (!normalizedSubmission.documentId) {
+      Alert.alert('No Document', 'This submission does not have a linked uploaded document.');
+      return;
+    }
+
+    try {
+      setOpeningDocument(true);
+      await documentsApi.openDocument(normalizedSubmission.documentId, normalizedSubmission.document);
+    } catch (error) {
+      Alert.alert('Could not open document', error?.message || 'Please try again.');
+    } finally {
+      setOpeningDocument(false);
+    }
+  };
 
   const handleAssign = () => {
     if (!normalizedSubmission.id) {
@@ -294,9 +368,7 @@ export function HODAssignInternalEvaluatorScreen({ route, navigation }) {
     if (normalizedSubmission.state !== 'APPROVED_BY_SUPERVISOR') {
       Alert.alert(
         'Invalid Workflow State',
-        `This submission is currently ${formatLabel(
-          normalizedSubmission.state
-        )}. Only supervisor-approved submissions can be assigned.`
+        `This submission is currently ${formatLabel(normalizedSubmission.state)}. Only supervisor-approved submissions can be assigned.`
       );
       return;
     }
@@ -305,10 +377,7 @@ export function HODAssignInternalEvaluatorScreen({ route, navigation }) {
       'Assign Internal Evaluator',
       `Assign ${selectedEvaluator.name} to evaluate "${normalizedSubmission.title}"?`,
       [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Assign',
           onPress: async () => {
@@ -329,21 +398,17 @@ export function HODAssignInternalEvaluatorScreen({ route, navigation }) {
                 comments: assignmentComments,
               });
 
-              Alert.alert(
-                'Assigned',
-                `${selectedEvaluator.name} assigned successfully.`,
-                [
-                  {
-                    text: 'OK',
-                    onPress: () => navigation.goBack(),
-                  },
-                ]
-              );
+              Alert.alert('Assigned', `${selectedEvaluator.name} assigned successfully.`, [
+                {
+                  text: 'OK',
+                  onPress: () =>
+                    navigation.navigate('HODTabs', {
+                      screen: 'HODAssignments',
+                    }),
+                },
+              ]);
             } catch (error) {
-              Alert.alert(
-                'Assignment Failed',
-                error?.message || 'Could not assign evaluator. Try again.'
-              );
+              Alert.alert('Assignment Failed', error?.message || 'Could not assign evaluator. Try again.');
             } finally {
               setAssigning(false);
             }
@@ -365,10 +430,7 @@ export function HODAssignInternalEvaluatorScreen({ route, navigation }) {
     <View style={styles.container}>
       <HODHeader title="Assign Internal Evaluator" navigation={navigation} showBack />
 
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
           <View style={styles.summaryTop}>
             <View style={styles.summaryIcon}>
@@ -377,55 +439,19 @@ export function HODAssignInternalEvaluatorScreen({ route, navigation }) {
 
             <View style={styles.summaryInfo}>
               <Text style={styles.studentName}>{normalizedSubmission.studentName}</Text>
-              <Text style={styles.infoText}>
-                Student No: {normalizedSubmission.studentId}
-              </Text>
+              <Text style={styles.infoText}>Student No: {normalizedSubmission.studentId}</Text>
               <Text style={styles.infoText}>Course: {normalizedSubmission.course}</Text>
+              <Text style={styles.infoText}>Reporting period: {normalizedSubmission.reportingPeriod}</Text>
             </View>
           </View>
         </View>
 
-        <View style={styles.card}>
-          <View style={styles.docRow}>
-            <View style={styles.docIconBox}>
-              <Ionicons
-                name="document-attach-outline"
-                size={22}
-                color="#1E56A0"
-              />
-            </View>
-
-            <View style={styles.docInfo}>
-              <Text style={styles.docName} numberOfLines={2}>
-                {normalizedSubmission.document}
-              </Text>
-              <Text style={styles.docSize}>
-                {normalizedSubmission.documentSize} · {normalizedSubmission.type}
-              </Text>
-              <Text style={styles.docSize}>
-                Status: {formatLabel(normalizedSubmission.state)}
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              style={styles.openBtn}
-              onPress={() =>
-                navigation.navigate('HODReviewSubmission', {
-                  submission,
-                })
-              }
-            >
-              <Text style={styles.openBtnText}>Open</Text>
-            </TouchableOpacity>
-          </View>
-
-          {!!normalizedSubmission.comments && (
-            <View style={styles.commentsBox}>
-              <Text style={styles.commentsLabel}>Student comments</Text>
-              <Text style={styles.commentsText}>{normalizedSubmission.comments}</Text>
-            </View>
-          )}
-        </View>
+        <DocumentSummaryCard
+          submission={normalizedSubmission}
+          openingDocument={openingDocument}
+          onOpenDocument={handleOpenDocument}
+          onReview={() => navigation.navigate('HODReviewSubmission', { submission })}
+        />
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Select Evaluator</Text>
@@ -435,44 +461,28 @@ export function HODAssignInternalEvaluatorScreen({ route, navigation }) {
             onPress={() => setShowList((value) => !value)}
             disabled={assigning}
           >
-            <Text
-              style={[
-                styles.dropdownText,
-                !selectedEvaluator && { color: '#9BA4B5' },
-              ]}
-            >
+            <Text style={[styles.dropdownText, !selectedEvaluator && { color: '#9BA4B5' }]}>
               {selectedEvaluator ? selectedEvaluator.name : 'Select an evaluator'}
             </Text>
 
-            <Ionicons
-              name={showList ? 'chevron-up' : 'chevron-down'}
-              size={18}
-              color="#6B7280"
-            />
+            <Ionicons name={showList ? 'chevron-up' : 'chevron-down'} size={18} color="#6B7280" />
           </TouchableOpacity>
 
           {showList && (
             <View style={styles.dropdownList}>
               {evaluators.length === 0 ? (
                 <View style={styles.emptyEvaluator}>
-                  <Text style={styles.emptyEvaluatorText}>
-                    No internal evaluators found.
-                  </Text>
+                  <Text style={styles.emptyEvaluatorText}>No internal evaluators found.</Text>
                 </View>
               ) : (
                 evaluators.map((evaluator) => {
                   const selected = selectedEvaluator?.id === evaluator.id;
-                  const role = Array.isArray(evaluator.roles)
-                    ? evaluator.roles[0]
-                    : 'INTERNAL_EVALUATOR';
+                  const role = Array.isArray(evaluator.roles) ? evaluator.roles[0] : 'INTERNAL_EVALUATOR';
 
                   return (
                     <TouchableOpacity
                       key={evaluator.id}
-                      style={[
-                        styles.dropdownItem,
-                        selected && styles.dropdownItemActive,
-                      ]}
+                      style={[styles.dropdownItem, selected && styles.dropdownItemActive]}
                       onPress={() => {
                         setSelectedEvaluator(evaluator);
                         setShowList(false);
@@ -480,32 +490,24 @@ export function HODAssignInternalEvaluatorScreen({ route, navigation }) {
                       disabled={assigning}
                     >
                       <View style={styles.evalMiniAvatar}>
-                        <Text style={styles.evalMiniAvatarText}>
-                          {getInitials(evaluator.name)}
-                        </Text>
+                        <Text style={styles.evalMiniAvatarText}>{getInitials(evaluator.name)}</Text>
                       </View>
 
                       <View style={styles.evalDropdownInfo}>
                         <Text
                           style={[
                             styles.dropdownItemText,
-                            selected && {
-                              color: '#1E56A0',
-                              fontWeight: '700',
-                            },
+                            selected && { color: '#1E56A0', fontWeight: '700' },
                           ]}
                         >
                           {evaluator.name}
                         </Text>
-
                         <Text style={styles.evaluatorMeta}>
                           {evaluator.email} · {formatLabel(role)}
                         </Text>
                       </View>
 
-                      {selected && (
-                        <Ionicons name="checkmark" size={18} color="#1E56A0" />
-                      )}
+                      {selected && <Ionicons name="checkmark" size={18} color="#1E56A0" />}
                     </TouchableOpacity>
                   );
                 })
@@ -521,7 +523,6 @@ export function HODAssignInternalEvaluatorScreen({ route, navigation }) {
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Assignment Comments</Text>
-
           <TextInput
             value={comments}
             onChangeText={setComments}
@@ -537,17 +538,8 @@ export function HODAssignInternalEvaluatorScreen({ route, navigation }) {
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Assign Evaluator</Text>
 
-          {selectedEvaluator ? (
-            <Text style={styles.selectedLabel}>
-              Selected: {selectedEvaluator.name}
-            </Text>
-          ) : null}
-
-          {deadline ? (
-            <Text style={styles.selectedLabel}>
-              Deadline: {formatDate(deadline)}
-            </Text>
-          ) : null}
+          {selectedEvaluator ? <Text style={styles.selectedLabel}>Selected: {selectedEvaluator.name}</Text> : null}
+          {deadline ? <Text style={styles.selectedLabel}>Deadline: {formatDate(deadline)}</Text> : null}
 
           <TouchableOpacity
             style={[styles.assignBtn, assigning && styles.disabled]}
@@ -569,146 +561,125 @@ export function HODAssignInternalEvaluatorScreen({ route, navigation }) {
   );
 }
 
-// ─── Propose External Evaluator ───────────────────────────────────────────────
 export function HODProposeExternalScreen({ route, navigation }) {
   const submission = route?.params?.submission || {};
-  const normalizedSubmission = normalizeSubmission(submission);
+  const normalizedSubmission = useMemo(() => normalizeSubmission(submission), [submission]);
 
-  const [evaluators] = useState([
-    {
-      id: 401,
-      name: 'Prof. Doe',
-      institution: 'MIT',
-      expertise: 'AI and Machine Learning',
-      match: 92,
-    },
-    {
-      id: 402,
-      name: 'Dr. Frankenstein',
-      institution: 'Namibia University of Science and Technology',
-      expertise: 'Machine Learning, Energy Systems',
-      match: 87,
-    },
-    {
-      id: 403,
-      name: 'Dr. Mortdecai Zhang Zu Wong',
-      institution: 'Brown University',
-      expertise: 'Neuroscience',
-      match: 74,
-    },
-  ]);
-
-  const [selected, setSelected] = useState(null);
+  const [comments, setComments] = useState('Internal evaluation completed. Forwarded to FPGC-R for review.');
   const [loading, setLoading] = useState(false);
+  const [openingDocument, setOpeningDocument] = useState(false);
 
-  const handleAssign = async () => {
-    if (!selected) {
-      Alert.alert('Required', 'Please select an evaluator to propose.');
+  const canForward = normalizedSubmission.state === 'INTERNAL_EVAL_COMPLETED';
+
+  const handleOpenDocument = async () => {
+    if (!normalizedSubmission.documentId) {
+      Alert.alert('No Document', 'This submission does not have a linked uploaded document.');
       return;
     }
 
-    setLoading(true);
-
     try {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-
-      Alert.alert(
-        'Forwarded to FPGC-R',
-        `${selected.name} proposed and submission forwarded to FPGC-R.`,
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.navigate('HODDashboard'),
-          },
-        ]
-      );
-    } catch {
-      Alert.alert('Error', 'Could not submit. Try again.');
+      setOpeningDocument(true);
+      await documentsApi.openDocument(normalizedSubmission.documentId, normalizedSubmission.document);
+    } catch (error) {
+      Alert.alert('Could not open document', error?.message || 'Please try again.');
     } finally {
-      setLoading(false);
+      setOpeningDocument(false);
     }
+  };
+
+  const handleForward = () => {
+    if (!normalizedSubmission.id) {
+      Alert.alert('Missing Submission', 'No submission was passed to this screen.');
+      return;
+    }
+
+    if (!canForward) {
+      Alert.alert(
+        'Invalid Workflow State',
+        `This submission is currently ${formatLabel(normalizedSubmission.state)}.`
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Forward to FPGC-R',
+      `Forward "${normalizedSubmission.title}" to FPGC-R for review?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Forward',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              await forwardToFPGCR(normalizedSubmission.id, comments.trim() || 'Forwarded to FPGC-R for review.');
+
+              Alert.alert('Forwarded', 'Submission forwarded to FPGC-R successfully.', [
+                {
+                  text: 'OK',
+                  onPress: () => navigation.navigate('HODDashboard'),
+                },
+              ]);
+            } catch (error) {
+              Alert.alert('Forward Failed', error?.message || 'Could not forward submission.');
+            } finally {
+              setLoading(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
     <View style={styles.container}>
-      <HODHeader title="Assign External Examiner" navigation={navigation} showBack />
+      <HODHeader title="Forward to FPGC-R" navigation={navigation} showBack />
 
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
           <Text style={styles.studentName}>{normalizedSubmission.studentName}</Text>
           <Text style={styles.infoText}>{normalizedSubmission.course}</Text>
           <Text style={[styles.infoText, styles.italicTitle]}>
             "{normalizedSubmission.title}"
           </Text>
+          <Text style={styles.infoText}>Status: {formatLabel(normalizedSubmission.state)}</Text>
         </View>
 
-        <Text style={styles.sectionHeader}>Proposed Evaluators</Text>
-
-        {evaluators.map((evaluator) => (
-          <TouchableOpacity
-            key={evaluator.id}
-            style={[
-              styles.evalCard,
-              selected?.id === evaluator.id && styles.evalCardSelected,
-            ]}
-            onPress={() => setSelected(evaluator)}
-          >
-            <View style={styles.evalTop}>
-              <View style={styles.evalAvatar}>
-                <Text style={styles.evalAvatarText}>
-                  {getInitials(evaluator.name)}
-                </Text>
-              </View>
-
-              <View style={styles.evalInfo}>
-                <Text style={styles.evalName}>{evaluator.name}</Text>
-                <Text style={styles.evalInst}>{evaluator.institution}</Text>
-                <Text style={styles.evalExpertise}>{evaluator.expertise}</Text>
-              </View>
-
-              {selected?.id === evaluator.id && (
-                <Ionicons name="checkmark-circle" size={24} color="#1E56A0" />
-              )}
-            </View>
-
-            <View style={styles.matchRow}>
-              <Text style={styles.matchLabel}>Expertise Match</Text>
-
-              <View style={styles.matchBarBg}>
-                <View
-                  style={[
-                    styles.matchBarFill,
-                    {
-                      width: `${evaluator.match}%`,
-                    },
-                  ]}
-                >
-                  <Text style={styles.matchBarText}>{evaluator.match}%</Text>
-                </View>
-              </View>
-            </View>
-          </TouchableOpacity>
-        ))}
+        <DocumentSummaryCard
+          submission={normalizedSubmission}
+          openingDocument={openingDocument}
+          onOpenDocument={handleOpenDocument}
+          onReview={() => navigation.navigate('HODReviewSubmission', { submission })}
+        />
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Approve Examiner</Text>
+          <Text style={styles.sectionTitle}>Forwarding Comments</Text>
+          <TextInput
+            value={comments}
+            onChangeText={setComments}
+            placeholder="Add comments for FPGC-R..."
+            placeholderTextColor="#9BA4B5"
+            multiline
+            textAlignVertical="top"
+            editable={!loading && canForward}
+            style={styles.textArea}
+          />
+        </View>
 
-          {selected ? (
-            <Text style={styles.selectedLabel}>Selected: {selected.name}</Text>
-          ) : null}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Submit to FPGC-R</Text>
 
           <TouchableOpacity
-            style={[styles.approveBtn, loading && styles.disabled]}
-            onPress={handleAssign}
-            disabled={loading}
+            style={[styles.forwardBtn, (!canForward || loading) && styles.disabled]}
+            onPress={handleForward}
+            disabled={!canForward || loading}
           >
             {loading ? (
               <ActivityIndicator color="#FFFFFF" size="small" />
             ) : (
-              <Text style={styles.assignBtnText}>Assign</Text>
+              <>
+                <Ionicons name="send-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.assignBtnText}>Forward to FPGC-R</Text>
+              </>
             )}
           </TouchableOpacity>
         </View>
@@ -718,31 +689,16 @@ export function HODProposeExternalScreen({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F0F2F5',
-  },
+  container: { flex: 1, backgroundColor: '#F0F2F5' },
   loading: {
     flex: 1,
     backgroundColor: '#F0F2F5',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  content: {
-    padding: 16,
-    gap: 12,
-    paddingBottom: 40,
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-  },
-  summaryTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
+  content: { padding: 16, gap: 12, paddingBottom: 40 },
+  card: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16 },
+  summaryTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   summaryIcon: {
     width: 46,
     height: 46,
@@ -751,29 +707,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  summaryInfo: {
-    flex: 1,
-  },
-  studentName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0D1B2A',
-    marginBottom: 4,
-  },
-  infoText: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginBottom: 2,
-  },
-  italicTitle: {
-    fontStyle: 'italic',
-    marginTop: 4,
-  },
-  docRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
+  summaryInfo: { flex: 1 },
+  studentName: { fontSize: 16, fontWeight: '600', color: '#0D1B2A', marginBottom: 4 },
+  infoText: { fontSize: 13, color: '#6B7280', marginBottom: 2 },
+  italicTitle: { fontStyle: 'italic', marginTop: 4 },
+  docRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   docIconBox: {
     width: 44,
     height: 44,
@@ -782,41 +720,31 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  docInfo: {
-    flex: 1,
-  },
-  docName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#0D1B2A',
-  },
-  docSize: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 2,
-  },
+  docInfo: { flex: 1 },
+  docName: { fontSize: 14, fontWeight: '600', color: '#0D1B2A' },
+  docSize: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  docButtonRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
   openBtn: {
+    flex: 1,
     backgroundColor: '#1E56A0',
     borderRadius: 10,
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
   },
-  openBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 13,
+  openBtnText: { color: '#FFFFFF', fontWeight: '600', fontSize: 13 },
+  reviewBtn: {
+    flex: 1,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#0D1B2A',
-    marginBottom: 12,
-  },
-  sectionHeader: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#0D1B2A',
-  },
+  reviewBtnText: { color: '#1E56A0', fontWeight: '700', fontSize: 13 },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#0D1B2A', marginBottom: 12 },
   dropdown: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -826,11 +754,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 14,
   },
-  dropdownText: {
-    fontSize: 14,
-    color: '#0D1B2A',
-    flex: 1,
-  },
+  dropdownText: { fontSize: 14, color: '#0D1B2A', flex: 1 },
   dropdownList: {
     marginTop: 8,
     borderWidth: 1,
@@ -846,13 +770,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  dropdownItemActive: {
-    backgroundColor: '#EFF6FF',
-  },
-  dropdownItemText: {
-    fontSize: 14,
-    color: '#0D1B2A',
-  },
+  dropdownItemActive: { backgroundColor: '#EFF6FF' },
+  dropdownItemText: { fontSize: 14, color: '#0D1B2A' },
   evalMiniAvatar: {
     width: 34,
     height: 34,
@@ -861,27 +780,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  evalMiniAvatarText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  evalDropdownInfo: {
-    flex: 1,
-  },
-  evaluatorMeta: {
-    fontSize: 11,
-    color: '#6B7280',
-    marginTop: 2,
-  },
-  emptyEvaluator: {
-    padding: 16,
-    alignItems: 'center',
-  },
-  emptyEvaluatorText: {
-    color: '#6B7280',
-    fontSize: 13,
-  },
+  evalMiniAvatarText: { color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' },
+  evalDropdownInfo: { flex: 1 },
+  evaluatorMeta: { fontSize: 11, color: '#6B7280', marginTop: 2 },
+  emptyEvaluator: { padding: 16, alignItems: 'center' },
+  emptyEvaluatorText: { color: '#6B7280', fontSize: 13 },
   textArea: {
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
@@ -891,6 +794,7 @@ const styles = StyleSheet.create({
     minHeight: 110,
     color: '#0D1B2A',
     fontSize: 14,
+    textAlignVertical: 'top',
   },
   commentsBox: {
     backgroundColor: '#F9FAFB',
@@ -899,17 +803,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
     gap: 4,
   },
-  commentsLabel: {
-    color: '#6B7280',
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  commentsText: {
-    color: '#374151',
-    fontSize: 13,
-    lineHeight: 19,
-  },
+  commentsLabel: { color: '#6B7280', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
+  commentsText: { color: '#374151', fontSize: 13, lineHeight: 19 },
   assignBtn: {
     backgroundColor: '#1E56A0',
     borderRadius: 12,
@@ -919,137 +814,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
-  approveBtn: {
-    backgroundColor: '#22C55E',
+  forwardBtn: {
+    backgroundColor: '#1E56A0',
     borderRadius: 12,
     padding: 15,
     alignItems: 'center',
-    marginTop: 8,
-  },
-  assignBtnText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  selectedLabel: {
-    fontSize: 14,
-    color: '#1E56A0',
-    fontWeight: '500',
-    marginBottom: 12,
-  },
-  disabled: {
-    opacity: 0.6,
-  },
-  evalCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  evalCardSelected: {
-    borderColor: '#1E56A0',
-  },
-  evalTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-    gap: 12,
-  },
-  evalAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#0D1B2A',
     justifyContent: 'center',
-    alignItems: 'center',
-  },
-  evalAvatarText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  evalInfo: {
-    flex: 1,
-  },
-  evalName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#0D1B2A',
-  },
-  evalInst: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginTop: 2,
-  },
-  evalExpertise: {
-    fontSize: 12,
-    color: '#9BA4B5',
-    marginTop: 2,
-  },
-  matchRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    gap: 8,
   },
-  matchLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#0D1B2A',
-    width: 110,
-  },
-  matchBarBg: {
-    flex: 1,
-    height: 22,
-    backgroundColor: '#E5E7EB',
-    borderRadius: 11,
-    overflow: 'hidden',
-  },
-  matchBarFill: {
-    height: '100%',
-    backgroundColor: '#1E56A0',
-    borderRadius: 11,
-    justifyContent: 'center',
-    minWidth: 40,
-  },
-  matchBarText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: 'bold',
-    paddingLeft: 8,
-  },
+  assignBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  selectedLabel: { fontSize: 14, color: '#1E56A0', fontWeight: '500', marginBottom: 12 },
+  disabled: { opacity: 0.6 },
 });
 
 const cal = StyleSheet.create({
-  nav: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  navBtn: {
-    padding: 8,
-  },
-  monthYear: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#0D1B2A',
-  },
-  dayNames: {
-    flexDirection: 'row',
-    marginBottom: 4,
-  },
-  dayName: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 12,
-    color: '#6B7280',
-    fontWeight: '600',
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
+  nav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  navBtn: { padding: 8 },
+  monthYear: { fontSize: 15, fontWeight: 'bold', color: '#0D1B2A' },
+  dayNames: { flexDirection: 'row', marginBottom: 4 },
+  dayName: { flex: 1, textAlign: 'center', fontSize: 12, color: '#6B7280', fontWeight: '600' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap' },
   cell: {
     width: '14.28%',
     aspectRatio: 1,
@@ -1057,22 +842,8 @@ const cal = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 100,
   },
-  selectedCell: {
-    backgroundColor: '#1E56A0',
-  },
-  cellText: {
-    fontSize: 13,
-    color: '#0D1B2A',
-  },
-  selectedText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  selectedLabel: {
-    marginTop: 10,
-    textAlign: 'center',
-    fontSize: 13,
-    color: '#1E56A0',
-    fontWeight: '500',
-  },
+  selectedCell: { backgroundColor: '#1E56A0' },
+  cellText: { fontSize: 13, color: '#0D1B2A', fontWeight: '500' },
+  selectedText: { color: '#FFFFFF', fontWeight: '800' },
+  selectedLabel: { marginTop: 10, color: '#1E56A0', fontSize: 13, fontWeight: '700' },
 });

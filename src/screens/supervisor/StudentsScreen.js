@@ -1,45 +1,62 @@
-import { useEffect, useState } from 'react';
+// src/screens/supervisor/StudentsScreen.js
+
+import { Ionicons } from '@expo/vector-icons';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import AppHeader from '../../components/AppHeader';
-import { CURRENT_SUPERVISOR } from '../../data/mockData';
-import { getSupervisorStudents } from '../../services/api';
 
-const getStatusColor = (status) => {
-  switch (status) {
-    case 'Approved': return '#22C55E';
-    case 'In Progress': return '#7C3AED';
-    case 'In Review': return '#7C3AED';
-    case 'Pending': return '#F59E0B';
-    case 'Returned': return '#EF4444';
-    default: return '#6B7280';
-  }
-};
+import AppHeader from '../../components/AppHeader';
+import { submissionsApi } from '../../api/submissionsApi';
+import {
+  getInitials,
+  getProgressFromState,
+  getStatusColor,
+  getStatusLabel,
+  groupStudentsFromSubmissions,
+} from './supervisorHelpers';
 
 export default function StudentsScreen({ navigation }) {
-  const [students, setStudents] = useState([]);
+  const [rawSubmissions, setRawSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadStudents = useCallback(async () => {
+    try {
+      const response = await submissionsApi.list();
+      const items = response?.data?.items || response?.items || [];
+
+      setRawSubmissions(items);
+    } catch (error) {
+      Alert.alert(
+        'Could not load students',
+        error?.message || 'Please try again.'
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
     loadStudents();
-  }, []);
+  }, [loadStudents]);
 
-  const loadStudents = async () => {
-    try {
-      const data = await getSupervisorStudents(CURRENT_SUPERVISOR.id);
-      setStudents(data);
-    } catch (error) {
-      console.error('Failed to load students:', error);
-    } finally {
-      setLoading(false);
-    }
+  const students = useMemo(
+    () => groupStudentsFromSubmissions(rawSubmissions),
+    [rawSubmissions]
+  );
+
+  const refresh = () => {
+    setRefreshing(true);
+    loadStudents();
   };
 
   if (loading) {
@@ -54,58 +71,83 @@ export default function StudentsScreen({ navigation }) {
     <View style={styles.container}>
       <AppHeader title="Students" navigation={navigation} />
 
-      <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
-        <Text style={styles.count}>{students.length} students</Text>
+      <ScrollView
+        style={styles.body}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} />
+        }
+      >
+        <Text style={styles.count}>
+          {students.length} {students.length === 1 ? 'student' : 'students'}
+        </Text>
 
-        {students.map((student) => (
-          <View key={student.id} style={styles.studentCard}>
-            {/* Avatar */}
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {student.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
-              </Text>
-            </View>
+        {students.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="people-outline" size={48} color="#9BA4B5" />
+            <Text style={styles.emptyTitle}>No students found</Text>
+            <Text style={styles.emptyText}>
+              Students with submissions assigned to you will appear here.
+            </Text>
+          </View>
+        ) : (
+          students.map((student) => (
+            <View key={student.id || student.name} style={styles.studentCard}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>
+                  {getInitials(student.name)}
+                </Text>
+              </View>
 
-            <View style={styles.studentInfo}>
-              <Text style={styles.studentName}>{student.name}</Text>
-              <Text style={styles.studentCourse} numberOfLines={1}>
-                {student.course}
-              </Text>
+              <View style={styles.studentInfo}>
+                <Text style={styles.studentName}>{student.name}</Text>
+                <Text style={styles.studentCourse} numberOfLines={1}>
+                  {student.course}
+                </Text>
 
-              {/* Progress bar */}
-              <View style={styles.progressBarBg}>
+                <View style={styles.progressBarBg}>
+                  <View
+                    style={[
+                      styles.progressBarFill,
+                      { width: `${student.progressPercentage}%` },
+                    ]}
+                  >
+                    <Text style={styles.progressPill}>
+                      {student.progressPercentage}%
+                    </Text>
+                  </View>
+                </View>
+
                 <View
                   style={[
-                    styles.progressBarFill,
-                    { width: `${student.progressPercentage}%` },
+                    styles.statusBadge,
+                    { backgroundColor: getStatusColor(student.status) },
                   ]}
                 >
-                  <Text style={styles.progressPill}>
-                    {student.progressPercentage}%
+                  <Text style={styles.statusBadgeText}>
+                    {getStatusLabel(student.status)}
                   </Text>
                 </View>
+
+                <Text style={styles.submissionCount}>
+                  {student.submissions.length} submission{student.submissions.length === 1 ? '' : 's'}
+                </Text>
               </View>
 
-              <View
-                style={[
-                  styles.statusBadge,
-                  { backgroundColor: getStatusColor(student.status) },
-                ]}
+              <TouchableOpacity
+                style={styles.viewBtn}
+                onPress={() =>
+                  navigation.navigate('ReviewReport', {
+                    student,
+                    submission: student.latestSubmission,
+                  })
+                }
               >
-                <Text style={styles.statusBadgeText}>{student.status}</Text>
-              </View>
+                <Text style={styles.viewBtnText}>View</Text>
+              </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              style={styles.viewBtn}
-              onPress={() =>
-                navigation.navigate('ReviewReport', { student })
-              }
-            >
-              <Text style={styles.viewBtnText}>View</Text>
-            </TouchableOpacity>
-          </View>
-        ))}
+          ))
+        )}
       </ScrollView>
     </View>
   );
@@ -158,7 +200,7 @@ const styles = StyleSheet.create({
   },
   studentName: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#0D1B2A',
   },
   studentCourse: {
@@ -194,6 +236,11 @@ const styles = StyleSheet.create({
   statusBadgeText: {
     color: '#FFFFFF',
     fontSize: 11,
+    fontWeight: '700',
+  },
+  submissionCount: {
+    color: '#9BA4B5',
+    fontSize: 11,
     fontWeight: '600',
   },
   viewBtn: {
@@ -204,7 +251,24 @@ const styles = StyleSheet.create({
   },
   viewBtnText: {
     color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 14,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  emptyCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 28,
+    alignItems: 'center',
+    gap: 10,
+  },
+  emptyTitle: {
+    color: '#0D1B2A',
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  emptyText: {
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });

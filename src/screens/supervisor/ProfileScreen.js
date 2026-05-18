@@ -13,9 +13,8 @@ import {
   View,
 } from 'react-native';
 
-import { CURRENT_SUPERVISOR } from '../../data/mockData';
-import { getSupervisorProfile } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
+import { formatLabel, getInitials } from './supervisorHelpers';
 
 export default function SupervisorProfileScreen({ navigation }) {
   const logout = useAuthStore((state) => state.logout);
@@ -32,58 +31,33 @@ export default function SupervisorProfileScreen({ navigation }) {
   const [department, setDepartment] = useState('');
   const [title, setTitle] = useState('');
 
-  useEffect(() => {
-    loadProfile();
-  }, []);
-
-  const loadProfile = async () => {
-    try {
-      const data = await getSupervisorProfile(CURRENT_SUPERVISOR.id);
-
-      const safeProfile = {
-        ...data,
-        name: data?.name || authUser?.name || 'Supervisor User',
-        department: data?.department || CURRENT_SUPERVISOR?.department || 'N/A',
-        title: data?.title || CURRENT_SUPERVISOR?.title || getDisplayRole(),
-      };
-
-      setProfile(safeProfile);
-      setName(safeProfile.name || '');
-      setDepartment(safeProfile.department || '');
-      setTitle(safeProfile.title || '');
-    } catch (error) {
-      console.error('Failed to load profile:', error);
-
-      const fallbackProfile = {
-        name: authUser?.name || 'Supervisor User',
-        department: CURRENT_SUPERVISOR?.department || 'N/A',
-        title: CURRENT_SUPERVISOR?.title || getDisplayRole(),
-      };
-
-      setProfile(fallbackProfile);
-      setName(fallbackProfile.name);
-      setDepartment(fallbackProfile.department);
-      setTitle(fallbackProfile.title);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const getDisplayRole = () => {
-    const primaryRole = Array.isArray(roles) && roles.length > 0 ? roles[0] : 'SUPERVISOR';
+    const primaryRole =
+      Array.isArray(roles) && roles.length > 0 ? roles[0] : 'SUPERVISOR';
 
-    return String(primaryRole)
-      .replace(/_/g, ' ')
-      .toLowerCase()
-      .replace(/\b\w/g, (char) => char.toUpperCase());
+    return formatLabel(primaryRole);
   };
+
+  useEffect(() => {
+    const safeProfile = {
+      name: authUser?.name || 'Supervisor User',
+      email: authUser?.email || 'supervisor@nust.na',
+      department: 'Postgraduate Studies',
+      title: getDisplayRole(),
+    };
+
+    setProfile(safeProfile);
+    setName(safeProfile.name);
+    setDepartment(safeProfile.department);
+    setTitle(safeProfile.title);
+    setLoading(false);
+  }, [authUser?.email, authUser?.name, roles]);
 
   const handleSave = async () => {
     setSaving(true);
 
     try {
-      // TODO: Replace this with PATCH /api/v1/profile or PATCH /supervisors/:id
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, 400));
 
       const updatedProfile = {
         ...profile,
@@ -95,7 +69,7 @@ export default function SupervisorProfileScreen({ navigation }) {
       setProfile(updatedProfile);
       setIsEditing(false);
 
-      Alert.alert('Success', 'Profile updated successfully.');
+      Alert.alert('Saved', 'Profile details updated locally for this session.');
     } catch (error) {
       Alert.alert('Error', 'Failed to save. Please try again.');
     } finally {
@@ -104,51 +78,29 @@ export default function SupervisorProfileScreen({ navigation }) {
   };
 
   const handleSignOut = () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      {
+        text: 'Cancel',
+        style: 'cancel',
+      },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setSigningOut(true);
+            await logout();
+          } catch (error) {
+            Alert.alert(
+              'Sign Out Failed',
+              error?.message || 'Could not sign out. Please try again.'
+            );
+          } finally {
+            setSigningOut(false);
+          }
         },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setSigningOut(true);
-              await logout();
-
-              /*
-                Do not manually navigate to Login here.
-                The root Navigation component watches the token.
-                Once logout clears the token, the app automatically renders LoginScreen.
-              */
-            } catch (error) {
-              Alert.alert(
-                'Sign Out Failed',
-                error?.message || 'Could not sign out. Please try again.'
-              );
-            } finally {
-              setSigningOut(false);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const getInitials = (fullName) => {
-    if (!fullName) return '?';
-
-    return fullName
-      .split(' ')
-      .filter(Boolean)
-      .map((n) => n[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
+      },
+    ]);
   };
 
   if (loading) {
@@ -162,27 +114,18 @@ export default function SupervisorProfileScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* ── HERO ── */}
         <View style={styles.hero}>
           <View style={styles.heroTopRow}>
             <Text style={styles.heroTitle}>Profile</Text>
 
-            <TouchableOpacity
-              onPress={() => navigation.navigate('NotificationsList')}
-            >
-              <Ionicons
-                name="notifications-outline"
-                size={24}
-                color="#FFFFFF"
-              />
+            <TouchableOpacity onPress={() => navigation.navigate('NotificationsList')}>
+              <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
 
           <View style={styles.avatarWrapper}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {getInitials(profile?.name)}
-              </Text>
+              <Text style={styles.avatarText}>{getInitials(profile?.name, 'SU')}</Text>
             </View>
           </View>
 
@@ -190,6 +133,7 @@ export default function SupervisorProfileScreen({ navigation }) {
           <Text style={styles.heroRole}>
             {profile?.title} · {profile?.department}
           </Text>
+          <Text style={styles.heroEmail}>{profile?.email}</Text>
         </View>
 
         <View style={styles.body}>
@@ -201,6 +145,16 @@ export default function SupervisorProfileScreen({ navigation }) {
                   <View style={styles.infoContent}>
                     <Text style={styles.infoLabel}>Full Name</Text>
                     <Text style={styles.infoValue}>{profile?.name}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.divider} />
+
+                <View style={styles.infoRow}>
+                  <Ionicons name="mail-outline" size={18} color="#6B7280" />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Email</Text>
+                    <Text style={styles.infoValue}>{profile?.email}</Text>
                   </View>
                 </View>
 
@@ -382,6 +336,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     textAlign: 'center',
   },
+  heroEmail: {
+    color: '#CBD5E1',
+    fontSize: 13,
+    textAlign: 'center',
+  },
   body: {
     padding: 16,
     gap: 16,
@@ -458,7 +417,7 @@ const styles = StyleSheet.create({
   cancelBtnText: {
     color: '#1E56A0',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   saveBtn: {
     flex: 1,
@@ -470,7 +429,7 @@ const styles = StyleSheet.create({
   btnText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   signOutBtn: {
     flexDirection: 'row',
@@ -485,7 +444,7 @@ const styles = StyleSheet.create({
   signOutText: {
     color: '#EF4444',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   disabledButton: {
     opacity: 0.7,
