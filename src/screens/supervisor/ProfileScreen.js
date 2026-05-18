@@ -1,3 +1,5 @@
+// src/screens/supervisor/ProfileScreen.js
+
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import {
@@ -10,13 +12,21 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+
 import { CURRENT_SUPERVISOR } from '../../data/mockData';
 import { getSupervisorProfile } from '../../services/api';
+import { useAuthStore } from '../../store/authStore';
 
 export default function SupervisorProfileScreen({ navigation }) {
+  const logout = useAuthStore((state) => state.logout);
+  const authUser = useAuthStore((state) => state.user);
+  const roles = useAuthStore((state) => state.roles);
+
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState('');
   const [department, setDepartment] = useState('');
@@ -29,24 +39,63 @@ export default function SupervisorProfileScreen({ navigation }) {
   const loadProfile = async () => {
     try {
       const data = await getSupervisorProfile(CURRENT_SUPERVISOR.id);
-      setProfile(data);
-      setName(data.name);
-      setDepartment(data.department);
-      setTitle(data.title);
+
+      const safeProfile = {
+        ...data,
+        name: data?.name || authUser?.name || 'Supervisor User',
+        department: data?.department || CURRENT_SUPERVISOR?.department || 'N/A',
+        title: data?.title || CURRENT_SUPERVISOR?.title || getDisplayRole(),
+      };
+
+      setProfile(safeProfile);
+      setName(safeProfile.name || '');
+      setDepartment(safeProfile.department || '');
+      setTitle(safeProfile.title || '');
     } catch (error) {
       console.error('Failed to load profile:', error);
+
+      const fallbackProfile = {
+        name: authUser?.name || 'Supervisor User',
+        department: CURRENT_SUPERVISOR?.department || 'N/A',
+        title: CURRENT_SUPERVISOR?.title || getDisplayRole(),
+      };
+
+      setProfile(fallbackProfile);
+      setName(fallbackProfile.name);
+      setDepartment(fallbackProfile.department);
+      setTitle(fallbackProfile.title);
     } finally {
       setLoading(false);
     }
   };
 
+  const getDisplayRole = () => {
+    const primaryRole = Array.isArray(roles) && roles.length > 0 ? roles[0] : 'SUPERVISOR';
+
+    return String(primaryRole)
+      .replace(/_/g, ' ')
+      .toLowerCase()
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  };
+
   const handleSave = async () => {
     setSaving(true);
+
     try {
-      // TODO: PATCH /supervisors/:id
+      // TODO: Replace this with PATCH /api/v1/profile or PATCH /supervisors/:id
       await new Promise((resolve) => setTimeout(resolve, 800));
-      Alert.alert('Success', 'Profile updated successfully.');
+
+      const updatedProfile = {
+        ...profile,
+        name,
+        title,
+        department,
+      };
+
+      setProfile(updatedProfile);
       setIsEditing(false);
+
+      Alert.alert('Success', 'Profile updated successfully.');
     } catch (error) {
       Alert.alert('Error', 'Failed to save. Please try again.');
     } finally {
@@ -54,10 +103,48 @@ export default function SupervisorProfileScreen({ navigation }) {
     }
   };
 
+  const handleSignOut = () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setSigningOut(true);
+              await logout();
+
+              /*
+                Do not manually navigate to Login here.
+                The root Navigation component watches the token.
+                Once logout clears the token, the app automatically renders LoginScreen.
+              */
+            } catch (error) {
+              Alert.alert(
+                'Sign Out Failed',
+                error?.message || 'Could not sign out. Please try again.'
+              );
+            } finally {
+              setSigningOut(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const getInitials = (fullName) => {
     if (!fullName) return '?';
+
     return fullName
       .split(' ')
+      .filter(Boolean)
       .map((n) => n[0])
       .join('')
       .toUpperCase()
@@ -75,11 +162,11 @@ export default function SupervisorProfileScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-
         {/* ── HERO ── */}
         <View style={styles.hero}>
           <View style={styles.heroTopRow}>
             <Text style={styles.heroTitle}>Profile</Text>
+
             <TouchableOpacity
               onPress={() => navigation.navigate('NotificationsList')}
             >
@@ -90,6 +177,7 @@ export default function SupervisorProfileScreen({ navigation }) {
               />
             </TouchableOpacity>
           </View>
+
           <View style={styles.avatarWrapper}>
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>
@@ -97,6 +185,7 @@ export default function SupervisorProfileScreen({ navigation }) {
               </Text>
             </View>
           </View>
+
           <Text style={styles.heroName}>{profile?.name}</Text>
           <Text style={styles.heroRole}>
             {profile?.title} · {profile?.department}
@@ -114,7 +203,9 @@ export default function SupervisorProfileScreen({ navigation }) {
                     <Text style={styles.infoValue}>{profile?.name}</Text>
                   </View>
                 </View>
+
                 <View style={styles.divider} />
+
                 <View style={styles.infoRow}>
                   <Ionicons name="briefcase-outline" size={18} color="#6B7280" />
                   <View style={styles.infoContent}>
@@ -122,7 +213,9 @@ export default function SupervisorProfileScreen({ navigation }) {
                     <Text style={styles.infoValue}>{profile?.title}</Text>
                   </View>
                 </View>
+
                 <View style={styles.divider} />
+
                 <View style={styles.infoRow}>
                   <Ionicons name="business-outline" size={18} color="#6B7280" />
                   <View style={styles.infoContent}>
@@ -143,6 +236,7 @@ export default function SupervisorProfileScreen({ navigation }) {
           ) : (
             <>
               <Text style={styles.sectionTitle}>Update Profile Details</Text>
+
               <View style={styles.card}>
                 <Text style={styles.fieldLabel}>Full Name</Text>
                 <TextInput
@@ -152,6 +246,7 @@ export default function SupervisorProfileScreen({ navigation }) {
                   placeholder="Enter your name"
                   placeholderTextColor="#9BA4B5"
                 />
+
                 <Text style={styles.fieldLabel}>Title</Text>
                 <TextInput
                   style={styles.input}
@@ -160,6 +255,7 @@ export default function SupervisorProfileScreen({ navigation }) {
                   placeholder="Enter your title"
                   placeholderTextColor="#9BA4B5"
                 />
+
                 <Text style={styles.fieldLabel}>Department</Text>
                 <TextInput
                   style={styles.input}
@@ -174,16 +270,17 @@ export default function SupervisorProfileScreen({ navigation }) {
                 <TouchableOpacity
                   style={styles.cancelBtn}
                   onPress={() => {
-                    setName(profile.name);
-                    setTitle(profile.title);
-                    setDepartment(profile.department);
+                    setName(profile?.name || '');
+                    setTitle(profile?.title || '');
+                    setDepartment(profile?.department || '');
                     setIsEditing(false);
                   }}
                 >
                   <Text style={styles.cancelBtnText}>Cancel</Text>
                 </TouchableOpacity>
+
                 <TouchableOpacity
-                  style={[styles.saveBtn, saving && { opacity: 0.7 }]}
+                  style={[styles.saveBtn, saving && styles.disabledButton]}
                   onPress={handleSave}
                   disabled={saving}
                 >
@@ -197,9 +294,19 @@ export default function SupervisorProfileScreen({ navigation }) {
             </>
           )}
 
-          <TouchableOpacity style={styles.signOutBtn}>
-            <Ionicons name="log-out-outline" size={18} color="#EF4444" />
-            <Text style={styles.signOutText}>Sign Out</Text>
+          <TouchableOpacity
+            style={[styles.signOutBtn, signingOut && styles.disabledButton]}
+            onPress={handleSignOut}
+            disabled={signingOut}
+          >
+            {signingOut ? (
+              <ActivityIndicator color="#EF4444" />
+            ) : (
+              <>
+                <Ionicons name="log-out-outline" size={18} color="#EF4444" />
+                <Text style={styles.signOutText}>Sign Out</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -268,10 +375,12 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 22,
     fontWeight: 'bold',
+    textAlign: 'center',
   },
   heroRole: {
     color: '#9BA4B5',
     fontSize: 15,
+    textAlign: 'center',
   },
   body: {
     padding: 16,
@@ -370,10 +479,15 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 16,
     marginBottom: 32,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
   },
   signOutText: {
     color: '#EF4444',
     fontSize: 16,
     fontWeight: '600',
+  },
+  disabledButton: {
+    opacity: 0.7,
   },
 });

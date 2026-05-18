@@ -28,3 +28,7 @@ Thumbs.db
 
 # EAS
 .easignore
+
+# Backend
+backend/.env
+backend/node_modules

@@ -1,8 +1,21 @@
+// src/navigation/index.js
+
+import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
+import {
+  ActivityIndicator,
+  Button,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
-// ─── Role Select ──────────────────────────────────────────────────────────────
+import LoginScreen from '../screens/auth/LoginScreen';
+import { useAuthStore } from '../store/authStore';
+
+// ─── Role Select / Fallback ──────────────────────────────────────────────────
 import RoleSelectScreen from '../screens/RoleSelectScreen';
 
 // ─── Student ──────────────────────────────────────────────────────────────────
@@ -14,6 +27,7 @@ import StudentProfile from '../screens/student/ProfileScreen';
 import ProgressScreen from '../screens/student/ProgressScreen';
 import SubmissionsScreen from '../screens/student/SubmissionsScreen';
 
+// ─── Admin ────────────────────────────────────────────────────────────────────
 import AdminDashboardScreen from '../screens/admin/DashboardScreen';
 import UsersScreen from '../screens/admin/UsersScreen';
 import SubmissionsOverviewScreen from '../screens/admin/SubmissionsOverviewScreen';
@@ -32,29 +46,180 @@ import SubmitDocumentsScreen from '../screens/supervisor/SubmitDocumentsScreen';
 
 // ─── HOD ──────────────────────────────────────────────────────────────────────
 import HODDashboardScreen from '../screens/hod/HODDashboardScreen';
-import { HODSubmissionsScreen, HODAssignmentsScreen, HODNotificationsScreen, HODProfileScreen } from '../screens/hod/HODExtraScreens';
+import {
+  HODSubmissionsScreen,
+  HODAssignmentsScreen,
+  HODNotificationsScreen,
+  HODProfileScreen,
+} from '../screens/hod/HODExtraScreens';
 import HODReviewSubmissionScreen from '../screens/hod/HODReviewSubmissionScreen';
-import { HODAssignInternalEvaluatorScreen, HODProposeExternalScreen } from '../screens/hod/HODWorkflowScreens';
+import {
+  HODAssignInternalEvaluatorScreen,
+  HODProposeExternalScreen,
+} from '../screens/hod/HODWorkflowScreens';
 
 // ─── Internal Evaluator ───────────────────────────────────────────────────────
-import { EvaluatorDashboard, EvaluatorEvaluations, EvaluatorProposalDetail, EvaluatorProfile, EvaluatorNotifications } from '../screens/evaluator/EvaluatorScreens';
+import {
+  EvaluatorDashboard,
+  EvaluatorEvaluations,
+  EvaluatorProposalDetail,
+  EvaluatorProfile,
+  EvaluatorNotifications,
+} from '../screens/evaluator/EvaluatorScreens';
 
 // ─── External Evaluator ───────────────────────────────────────────────────────
-import { ExternalEvaluatorClaims, ExternalEvaluatorDashboard, ExternalEvaluatorNotifications, ExternalEvaluatorProfile, ExternalEvaluatorThesisDetail, ExternalEvaluatorTheses } from '../screens/externalEvaluator/ExternalEvaluatorScreens';
+import {
+  ExternalEvaluatorClaims,
+  ExternalEvaluatorDashboard,
+  ExternalEvaluatorNotifications,
+  ExternalEvaluatorProfile,
+  ExternalEvaluatorThesisDetail,
+  ExternalEvaluatorTheses,
+} from '../screens/externalEvaluator/ExternalEvaluatorScreens';
 
 // ─── FPGC-R ───────────────────────────────────────────────────────────────────
-import { FPGCRDashboard, FPGCRReviews, FPGCRHdcDecision, FPGCRDecisions, FPGCRProfile, FPGCRNotifications } from '../screens/fpgcr/FPGCRScreens';
+import {
+  FPGCRDashboard,
+  FPGCRReviews,
+  FPGCRHdcDecision,
+  FPGCRDecisions,
+  FPGCRProfile,
+  FPGCRNotifications,
+} from '../screens/fpgcr/FPGCRScreens';
 
 // ─── FPGC ─────────────────────────────────────────────────────────────────────
-import { FPGCDashboard, FPGCApplications, FPGCAssignments, FPGCProfile, FPGCNotifications } from '../screens/fpgc/FPGCScreens';
+import {
+  FPGCDashboard,
+  FPGCApplications,
+  FPGCAssignments,
+  FPGCProfile,
+  FPGCNotifications,
+} from '../screens/fpgc/FPGCScreens';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 
-// ─── Student ──────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function getRoleNames(roles = [], user = null) {
+  const rawRoles =
+    Array.isArray(roles) && roles.length
+      ? roles
+      : Array.isArray(user?.roles)
+        ? user.roles
+        : user?.role
+          ? [user.role]
+          : [];
+
+  return rawRoles
+    .map((role) => {
+      if (typeof role === 'string') return role;
+
+      return (
+        role?.name ||
+        role?.code ||
+        role?.slug ||
+        role?.role ||
+        role?.role_name ||
+        ''
+      );
+    })
+    .filter(Boolean)
+    .map((role) => String(role).trim().toUpperCase().replace(/[\s-]+/g, '_'));
+}
+
+function getPrimaryRole(roleNames) {
+  const priority = [
+    'SYSTEM_ADMIN',
+    'ADMIN',
+    'FPGC',
+    'FPGC_R',
+    'HOD',
+    'INTERNAL_EVALUATOR',
+    'EXTERNAL_EVALUATOR',
+    'SUPERVISOR',
+    'STUDENT',
+  ];
+
+  return priority.find((role) => roleNames.includes(role)) || roleNames[0] || null;
+}
+
+function LoadingScreen() {
+  return (
+    <View style={styles.centerScreen}>
+      <ActivityIndicator size="large" color="#1E56A0" />
+      <Text style={styles.centerText}>Loading your workspace...</Text>
+    </View>
+  );
+}
+
+function NoRoleScreen({ navigation }) {
+  const logout = useAuthStore((state) => state.logout);
+  const user = useAuthStore((state) => state.user);
+
+  return (
+    <View style={styles.centerScreen}>
+      <Text style={styles.title}>No active role found</Text>
+
+      <Text style={styles.centerText}>
+        {user?.email || 'This account'} does not have a recognised role assigned.
+      </Text>
+
+      <Text style={styles.centerText}>
+        Ask an administrator to assign a valid role, or use the manual selector for testing.
+      </Text>
+
+      <View style={styles.actionGroup}>
+        <Button title="Use Manual Role Selector" onPress={() => navigation.navigate('RoleSelect')} />
+        <Button title="Sign Out" color="#B42318" onPress={logout} />
+      </View>
+    </View>
+  );
+}
+
+function screenIcon(routeName, icons) {
+  return icons[routeName] || 'ellipse-outline';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth
+// ─────────────────────────────────────────────────────────────────────────────
+
+function AuthStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Login" component={LoginScreen} />
+    </Stack.Navigator>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Student
+// ─────────────────────────────────────────────────────────────────────────────
+
 function StudentTabs() {
   return (
-    <Tab.Navigator screenOptions={({ route }) => ({ tabBarActiveTintColor: '#1E56A0', tabBarInactiveTintColor: '#9BA4B5', headerShown: false, tabBarIcon: ({ color, size }) => <Ionicons name={{ Home: 'home', Submissions: 'document-text', Progress: 'bar-chart', Profile: 'person' }[route.name]} size={size} color={color} /> })}>
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        tabBarActiveTintColor: '#1E56A0',
+        tabBarInactiveTintColor: '#9BA4B5',
+        headerShown: false,
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons
+            name={screenIcon(route.name, {
+              Home: 'home',
+              Submissions: 'document-text',
+              Progress: 'bar-chart',
+              Profile: 'person',
+            })}
+            size={size}
+            color={color}
+          />
+        ),
+      })}
+    >
       <Tab.Screen name="Home" component={StudentDashboard} />
       <Tab.Screen name="Submissions" component={SubmissionsScreen} />
       <Tab.Screen name="Progress" component={ProgressScreen} />
@@ -62,6 +227,7 @@ function StudentTabs() {
     </Tab.Navigator>
   );
 }
+
 function StudentStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -73,10 +239,31 @@ function StudentStack() {
   );
 }
 
-// ─── Supervisor ───────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Supervisor
+// ─────────────────────────────────────────────────────────────────────────────
+
 function SupervisorTabs() {
   return (
-    <Tab.Navigator screenOptions={({ route }) => ({ tabBarActiveTintColor: '#1E56A0', tabBarInactiveTintColor: '#9BA4B5', headerShown: false, tabBarIcon: ({ color, size }) => <Ionicons name={{ Home: 'home', Students: 'school', Reviews: 'search', Profile: 'person' }[route.name]} size={size} color={color} /> })}>
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        tabBarActiveTintColor: '#1E56A0',
+        tabBarInactiveTintColor: '#9BA4B5',
+        headerShown: false,
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons
+            name={screenIcon(route.name, {
+              Home: 'home',
+              Students: 'school',
+              Reviews: 'search',
+              Profile: 'person',
+            })}
+            size={size}
+            color={color}
+          />
+        ),
+      })}
+    >
       <Tab.Screen name="Home" component={SupervisorDashboardScreen} />
       <Tab.Screen name="Students" component={StudentsScreen} />
       <Tab.Screen name="Reviews" component={ReviewsScreen} />
@@ -84,6 +271,7 @@ function SupervisorTabs() {
     </Tab.Navigator>
   );
 }
+
 function SupervisorStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -95,10 +283,31 @@ function SupervisorStack() {
   );
 }
 
-// ─── HOD ──────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// HOD
+// ─────────────────────────────────────────────────────────────────────────────
+
 function HODTabs() {
   return (
-    <Tab.Navigator screenOptions={({ route }) => ({ tabBarActiveTintColor: '#1E56A0', tabBarInactiveTintColor: '#9BA4B5', headerShown: false, tabBarIcon: ({ color, size }) => <Ionicons name={{ HODHome: 'home', HODSubmissions: 'document-text', HODAssignments: 'person-add', HODProfile: 'person' }[route.name]} size={size} color={color} /> })}>
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        tabBarActiveTintColor: '#1E56A0',
+        tabBarInactiveTintColor: '#9BA4B5',
+        headerShown: false,
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons
+            name={screenIcon(route.name, {
+              HODHome: 'home',
+              HODSubmissions: 'document-text',
+              HODAssignments: 'person-add',
+              HODProfile: 'person',
+            })}
+            size={size}
+            color={color}
+          />
+        ),
+      })}
+    >
       <Tab.Screen name="HODHome" component={HODDashboardScreen} options={{ tabBarLabel: 'Home' }} />
       <Tab.Screen name="HODSubmissions" component={HODSubmissionsScreen} options={{ tabBarLabel: 'Submissions' }} />
       <Tab.Screen name="HODAssignments" component={HODAssignmentsScreen} options={{ tabBarLabel: 'Assignments' }} />
@@ -106,6 +315,7 @@ function HODTabs() {
     </Tab.Navigator>
   );
 }
+
 function HODStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -119,16 +329,38 @@ function HODStack() {
   );
 }
 
-// ─── Internal Evaluator ───────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Internal Evaluator
+// ─────────────────────────────────────────────────────────────────────────────
+
 function EvaluatorTabs() {
   return (
-    <Tab.Navigator screenOptions={({ route }) => ({ tabBarActiveTintColor: '#1E56A0', tabBarInactiveTintColor: '#9BA4B5', headerShown: false, tabBarIcon: ({ color, size }) => <Ionicons name={{ EvalHome: 'home', EvalEvaluations: 'search', EvalProposals: 'document-text', EvalProfile: 'person' }[route.name]} size={size} color={color} /> })}>
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        tabBarActiveTintColor: '#1E56A0',
+        tabBarInactiveTintColor: '#9BA4B5',
+        headerShown: false,
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons
+            name={screenIcon(route.name, {
+              EvalHome: 'home',
+              EvalEvaluations: 'search',
+              EvalProposals: 'document-text',
+              EvalProfile: 'person',
+            })}
+            size={size}
+            color={color}
+          />
+        ),
+      })}
+    >
       <Tab.Screen name="EvalHome" component={EvaluatorDashboard} options={{ tabBarLabel: 'Home' }} />
       <Tab.Screen name="EvalEvaluations" component={EvaluatorEvaluations} options={{ tabBarLabel: 'Evaluations' }} />
       <Tab.Screen name="EvalProfile" component={EvaluatorProfile} options={{ tabBarLabel: 'Profile' }} />
     </Tab.Navigator>
   );
 }
+
 function EvaluatorStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -140,10 +372,31 @@ function EvaluatorStack() {
   );
 }
 
-// ─── External Evaluator ───────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// External Evaluator
+// ─────────────────────────────────────────────────────────────────────────────
+
 function ExternalEvaluatorTabs() {
   return (
-    <Tab.Navigator screenOptions={({ route }) => ({ tabBarActiveTintColor: '#1E56A0', tabBarInactiveTintColor: '#9BA4B5', headerShown: false, tabBarIcon: ({ color, size }) => <Ionicons name={{ ExtHome: 'home', ExtTheses: 'document-text', ExtClaims: 'wallet', ExtProfile: 'person' }[route.name]} size={size} color={color} /> })}>
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        tabBarActiveTintColor: '#1E56A0',
+        tabBarInactiveTintColor: '#9BA4B5',
+        headerShown: false,
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons
+            name={screenIcon(route.name, {
+              ExtHome: 'home',
+              ExtTheses: 'document-text',
+              ExtClaims: 'wallet',
+              ExtProfile: 'person',
+            })}
+            size={size}
+            color={color}
+          />
+        ),
+      })}
+    >
       <Tab.Screen name="ExtHome" component={ExternalEvaluatorDashboard} options={{ tabBarLabel: 'Home' }} />
       <Tab.Screen name="ExtTheses" component={ExternalEvaluatorTheses} options={{ tabBarLabel: 'Thesis' }} />
       <Tab.Screen name="ExtClaims" component={ExternalEvaluatorClaims} options={{ tabBarLabel: 'Claims' }} />
@@ -151,6 +404,7 @@ function ExternalEvaluatorTabs() {
     </Tab.Navigator>
   );
 }
+
 function ExternalEvaluatorStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -161,10 +415,31 @@ function ExternalEvaluatorStack() {
   );
 }
 
-// ─── FPGC-R ───────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// FPGC-R
+// ─────────────────────────────────────────────────────────────────────────────
+
 function FPGCRTabs() {
   return (
-    <Tab.Navigator screenOptions={({ route }) => ({ tabBarActiveTintColor: '#1E56A0', tabBarInactiveTintColor: '#9BA4B5', headerShown: false, tabBarIcon: ({ color, size }) => <Ionicons name={{ FPGCRHome: 'home', FPGCRReviews: 'search', FPGCRDecisions: 'checkmark-done', FPGCRProfileTab: 'person' }[route.name]} size={size} color={color} /> })}>
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        tabBarActiveTintColor: '#1E56A0',
+        tabBarInactiveTintColor: '#9BA4B5',
+        headerShown: false,
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons
+            name={screenIcon(route.name, {
+              FPGCRHome: 'home',
+              FPGCRReviews: 'search',
+              FPGCRDecisions: 'checkmark-done',
+              FPGCRProfileTab: 'person',
+            })}
+            size={size}
+            color={color}
+          />
+        ),
+      })}
+    >
       <Tab.Screen name="FPGCRHome" component={FPGCRDashboard} options={{ tabBarLabel: 'Home' }} />
       <Tab.Screen name="FPGCRReviews" component={FPGCRReviews} options={{ tabBarLabel: 'Reviews' }} />
       <Tab.Screen name="FPGCRDecisions" component={FPGCRDecisions} options={{ tabBarLabel: 'Decisions' }} />
@@ -172,6 +447,7 @@ function FPGCRTabs() {
     </Tab.Navigator>
   );
 }
+
 function FPGCRStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -184,10 +460,31 @@ function FPGCRStack() {
   );
 }
 
-// ─── FPGC ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// FPGC
+// ─────────────────────────────────────────────────────────────────────────────
+
 function FPGCTabs() {
   return (
-    <Tab.Navigator screenOptions={({ route }) => ({ tabBarActiveTintColor: '#1E56A0', tabBarInactiveTintColor: '#9BA4B5', headerShown: false, tabBarIcon: ({ color, size }) => <Ionicons name={{ FPGCHome: 'home', FPGCApplications: 'document-text', FPGCAssignments: 'people', FPGCProfileTab: 'person' }[route.name]} size={size} color={color} /> })}>
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        tabBarActiveTintColor: '#1E56A0',
+        tabBarInactiveTintColor: '#9BA4B5',
+        headerShown: false,
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons
+            name={screenIcon(route.name, {
+              FPGCHome: 'home',
+              FPGCApplications: 'document-text',
+              FPGCAssignments: 'people',
+              FPGCProfileTab: 'person',
+            })}
+            size={size}
+            color={color}
+          />
+        ),
+      })}
+    >
       <Tab.Screen name="FPGCHome" component={FPGCDashboard} options={{ tabBarLabel: 'Home' }} />
       <Tab.Screen name="FPGCApplications" component={FPGCApplications} options={{ tabBarLabel: 'Applications' }} />
       <Tab.Screen name="FPGCAssignments" component={FPGCAssignments} options={{ tabBarLabel: 'Assignments' }} />
@@ -195,6 +492,7 @@ function FPGCTabs() {
     </Tab.Navigator>
   );
 }
+
 function FPGCStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -206,6 +504,10 @@ function FPGCStack() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin
+// ─────────────────────────────────────────────────────────────────────────────
+
 function AdminTabs() {
   return (
     <Tab.Navigator
@@ -213,17 +515,18 @@ function AdminTabs() {
         tabBarActiveTintColor: '#1E56A0',
         tabBarInactiveTintColor: '#9BA4B5',
         headerShown: false,
-        tabBarIcon: ({ color, size }) => {
-          const icons = {
-            Home: 'home',
-            Users: 'people',
-            Submissions: 'document-text',
-            Settings: 'settings',
-          };
-          return (
-            <Ionicons name={icons[route.name]} size={size} color={color} />
-          );
-        },
+        tabBarIcon: ({ color, size }) => (
+          <Ionicons
+            name={screenIcon(route.name, {
+              Home: 'home',
+              Users: 'people',
+              Submissions: 'document-text',
+              Settings: 'settings',
+            })}
+            size={size}
+            color={color}
+          />
+        ),
       })}
     >
       <Tab.Screen name="Home" component={AdminDashboardScreen} />
@@ -244,10 +547,14 @@ function AdminStack() {
   );
 }
 
-// ─── Root ─────────────────────────────────────────────────────────────────────
-export default function Navigation() {
+// ─────────────────────────────────────────────────────────────────────────────
+// Manual role selector fallback
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ManualRoleSelectStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="NoRole" component={NoRoleScreen} />
       <Stack.Screen name="RoleSelect" component={RoleSelectScreen} />
       <Stack.Screen name="StudentStack" component={StudentStack} />
       <Stack.Screen name="SupervisorStack" component={SupervisorStack} />
@@ -260,3 +567,70 @@ export default function Navigation() {
     </Stack.Navigator>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Root navigation
+// ─────────────────────────────────────────────────────────────────────────────
+
+export default function Navigation() {
+  const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
+  const roles = useAuthStore((state) => state.roles);
+  const bootstrapping = useAuthStore((state) => state.bootstrapping);
+
+  if (bootstrapping) {
+    return <LoadingScreen />;
+  }
+
+  if (!token) {
+    return <AuthStack />;
+  }
+
+  const roleNames = getRoleNames(roles, user);
+  const primaryRole = getPrimaryRole(roleNames);
+
+  const roleStackMap = {
+    STUDENT: StudentStack,
+    SUPERVISOR: SupervisorStack,
+    HOD: HODStack,
+    INTERNAL_EVALUATOR: EvaluatorStack,
+    EXTERNAL_EVALUATOR: ExternalEvaluatorStack,
+    FPGC_R: FPGCRStack,
+    FPGC: FPGCStack,
+    SYSTEM_ADMIN: AdminStack,
+    ADMIN: AdminStack,
+  };
+
+  const SelectedStack = roleStackMap[primaryRole] || ManualRoleSelectStack;
+
+  return <SelectedStack key={primaryRole || 'NO_ROLE'} />;
+}
+
+const styles = StyleSheet.create({
+  centerScreen: {
+    flex: 1,
+    backgroundColor: '#EEF3FB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  title: {
+    color: '#07122A',
+    fontSize: 22,
+    fontWeight: '800',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  centerText: {
+    color: '#5D6678',
+    fontSize: 15,
+    textAlign: 'center',
+    marginBottom: 12,
+    lineHeight: 22,
+  },
+  actionGroup: {
+    width: '100%',
+    gap: 12,
+    marginTop: 12,
+  },
+});
