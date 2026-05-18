@@ -1,9 +1,11 @@
 // src/screens/hod/HODSubmissionsScreen.js
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View, Alert} from 'react-native';
 import HODHeader from '../../components/HODHeader';
 import { getHODSubmissions } from '../../services/hodApi';
+import { useAuthStore } from '../../store/authStore';
+ 
 
 const getStatusColor = (s) => ({ WITH_HOD: '#F59E0B', UNDER_INTERNAL_EVAL: '#7C3AED', APPROVED: '#22C55E', REJECTED: '#EF4444' }[s] || '#6B7280');
 const getStatusLabel = (s) => ({ WITH_HOD: 'Awaiting Action', UNDER_INTERNAL_EVAL: 'Under Review', APPROVED: 'Approved', REJECTED: 'Rejected' }[s] || s);
@@ -143,25 +145,111 @@ export function HODNotificationsScreen({ navigation }) {
 
 // ─── Profile Screen ───────────────────────────────────────────────────────────
 export function HODProfileScreen({ navigation }) {
-  const profile = { name: 'Prof. Ndapewa Iyambo', email: 'hod@nust.na', role: 'Head of Department', department: 'Software Engineering', phone: '+264 61 207 2000' };
-  const initials = profile.name.split(' ').map(w => w[0]).slice(0, 2).join('');
+  const logout = useAuthStore((state) => state.logout);
+  const authUser = useAuthStore((state) => state.user);
+
+  const [signingOut, setSigningOut] = useState(false);
+
+  const profile = {
+    name: authUser?.name || 'Prof. Ndapewa Iyambo',
+    email: authUser?.email || 'hod@nust.na',
+    role: 'Head of Department',
+    department: 'Software Engineering',
+    phone: '+264 61 207 2000',
+  };
+
+  const initials = profile.name
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Log Out',
+      'Are you sure you want to log out?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Log Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setSigningOut(true);
+              await logout();
+
+              /*
+                Do not navigate manually to RoleSelect or Login here.
+                The root Navigation component checks the auth token.
+                Once logout clears the token, the app automatically returns to LoginScreen.
+              */
+            } catch (error) {
+              Alert.alert(
+                'Logout Failed',
+                error?.message || 'Could not log out. Please try again.'
+              );
+            } finally {
+              setSigningOut(false);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <View style={s.container}>
       <HODHeader title="Profile" navigation={navigation} />
+
       <View style={s.avatarSection}>
-        <View style={s.avatar}><Text style={s.avatarText}>{initials}</Text></View>
+        <View style={s.avatar}>
+          <Text style={s.avatarText}>{initials}</Text>
+        </View>
+
         <Text style={s.profileName}>{profile.name}</Text>
-        <View style={s.rolePill}><Text style={s.rolePillText}>{profile.role}</Text></View>
+
+        <View style={s.rolePill}>
+          <Text style={s.rolePillText}>{profile.role}</Text>
+        </View>
       </View>
+
       <View style={s.infoCard}>
         {[
-          { icon: 'mail-outline', label: 'Email', value: profile.email },
-          { icon: 'business-outline', label: 'Department', value: profile.department },
-          { icon: 'call-outline', label: 'Phone', value: profile.phone },
-        ].map((row, i, arr) => (
-          <View key={i} style={[s.infoRow, i < arr.length - 1 && s.infoRowBorder]}>
-            <Ionicons name={row.icon} size={20} color="#1E56A0" style={{ width: 28 }} />
+          {
+            icon: 'mail-outline',
+            label: 'Email',
+            value: profile.email,
+          },
+          {
+            icon: 'business-outline',
+            label: 'Department',
+            value: profile.department,
+          },
+          {
+            icon: 'call-outline',
+            label: 'Phone',
+            value: profile.phone,
+          },
+        ].map((row, index, array) => (
+          <View
+            key={row.label}
+            style={[
+              s.infoRow,
+              index < array.length - 1 && s.infoRowBorder,
+            ]}
+          >
+            <Ionicons
+              name={row.icon}
+              size={20}
+              color="#1E56A0"
+              style={{ width: 28 }}
+            />
+
             <View>
               <Text style={s.infoLabel}>{row.label}</Text>
               <Text style={s.infoValue}>{row.value}</Text>
@@ -169,9 +257,20 @@ export function HODProfileScreen({ navigation }) {
           </View>
         ))}
       </View>
-      <TouchableOpacity style={s.logoutBtn} onPress={() => navigation.replace('RoleSelect')}>
-        <Ionicons name="log-out-outline" size={20} color="#EF4444" />
-        <Text style={s.logoutText}>Log Out</Text>
+
+      <TouchableOpacity
+        style={[s.logoutBtn, signingOut && { opacity: 0.7 }]}
+        onPress={handleLogout}
+        disabled={signingOut}
+      >
+        {signingOut ? (
+          <ActivityIndicator color="#EF4444" />
+        ) : (
+          <>
+            <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+            <Text style={s.logoutText}>Log Out</Text>
+          </>
+        )}
       </TouchableOpacity>
     </View>
   );
