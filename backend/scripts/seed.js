@@ -7,10 +7,14 @@ async function seed() {
   const passwordHash = await bcrypt.hash('Password123!', 12);
 
   const users = [
-    { name: 'Student User', email: 'student@nust.na', role: 'STUDENT' },
-    { name: 'Supervisor User', email: 'supervisor@nust.na', role: 'SUPERVISOR' },
-    { name: 'HOD User', email: 'hod@nust.na', role: 'HOD' },
-    { name: 'Admin User', email: 'admin@nust.na', role: 'SYSTEM_ADMIN' },
+  { name: 'Student User', email: 'student@nust.na', role: 'STUDENT' },
+  { name: 'Supervisor User', email: 'supervisor@nust.na', role: 'SUPERVISOR' },
+  { name: 'HOD User', email: 'hod@nust.na', role: 'HOD' },
+  { name: 'Internal Evaluator User', email: 'internal@nust.na', role: 'INTERNAL_EVALUATOR' },
+  { name: 'External Evaluator User', email: 'external@nust.na', role: 'EXTERNAL_EVALUATOR' },
+  { name: 'FPGC-R User', email: 'fpgcr@nust.na', role: 'FPGC_R' },
+  { name: 'FPGC User', email: 'fpgc@nust.na', role: 'FPGC' },
+  { name: 'Admin User', email: 'admin@nust.na', role: 'SYSTEM_ADMIN' },
   ];
 
   for (const user of users) {

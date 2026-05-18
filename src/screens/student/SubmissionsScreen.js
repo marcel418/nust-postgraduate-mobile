@@ -1,10 +1,13 @@
+// src/screens/student/SubmissionsScreen.js
+
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Modal,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,48 +15,153 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+
 import AppHeader from '../../components/AppHeader';
-import { CURRENT_STUDENT } from '../../data/mockData';
-import { getStudentSubmissions, submitProgressReport } from '../../services/api';
+import { api } from '../../api/http';
+
+const REPORTING_PERIODS = ['Today', 'This Week', 'This Month', 'Last 30 Days'];
 
 const getStatusColor = (status) => {
   switch (status) {
-    case 'Approved': return '#22C55E';
-    case 'In Review': return '#7C3AED';
-    case 'Returned': return '#EF4444';
-    case 'Pending': return '#F59E0B';
-    default: return '#6B7280';
+    case 'APPROVED':
+      return '#22C55E';
+    case 'SUBMITTED':
+      return '#7C3AED';
+    case 'REVISIONS_REQUIRED':
+      return '#F59E0B';
+    case 'REJECTED':
+      return '#EF4444';
+    case 'DRAFT':
+      return '#6B7280';
+    default:
+      return '#6B7280';
   }
 };
 
-const REPORTING_PERIODS = ['Today', 'This Week', 'This Month', 'Last 30 Days'];
+const getStatusLabel = (status) => {
+  if (!status) return 'Unknown';
+
+  if (status === 'SUBMITTED') return 'In Review';
+
+  return String(status)
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const formatFileSize = (bytes) => {
+  if (!bytes) return 'Unknown size';
+
+  const mb = bytes / (1024 * 1024);
+
+  if (mb >= 1) {
+    return `${mb.toFixed(1)} MB`;
+  }
+
+  return `${(bytes / 1024).toFixed(1)} KB`;
+};
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return 'N/A';
+
+  try {
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  } catch {
+    return 'N/A';
+  }
+};
+
+const parseDescription = (description) => {
+  if (!description) {
+    return {
+      comments: '',
+      reportingPeriod: 'N/A',
+      fileName: '',
+      fileSize: '',
+      documentId: null,
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(description);
+
+    return {
+      comments: parsed.comments || '',
+      reportingPeriod: parsed.reportingPeriod || 'N/A',
+      fileName: parsed.fileName || '',
+      fileSize: parsed.fileSize || '',
+      documentId: parsed.documentId || null,
+    };
+  } catch {
+    return {
+      comments: description,
+      reportingPeriod: 'N/A',
+      fileName: '',
+      fileSize: '',
+      documentId: null,
+    };
+  }
+};
 
 export default function SubmissionsScreen({ navigation }) {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
   const [selectedPeriod, setSelectedPeriod] = useState('');
   const [comments, setComments] = useState('');
   const [periodDropdownOpen, setPeriodDropdownOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
 
-  useEffect(() => {
-    loadSubmissions();
-  }, []);
+  const submissionCountText = useMemo(() => {
+    if (submissions.length === 1) return '1 submission';
+    return `${submissions.length} submissions`;
+  }, [submissions.length]);
 
-  const loadSubmissions = async () => {
+  const loadSubmissions = useCallback(async () => {
     try {
-      const data = await getStudentSubmissions(CURRENT_STUDENT.id);
-      const sorted = data.sort(
-        (a, b) => new Date(b.submittedAt) - new Date(a.submittedAt)
+      const response = await api.get('/submissions');
+      const items = response?.data?.items || [];
+
+      const sorted = [...items].sort(
+        (a, b) =>
+          new Date(b.created_at || b.updated_at || 0) -
+          new Date(a.created_at || a.updated_at || 0)
       );
+
       setSubmissions(sorted);
     } catch (error) {
-      console.error('Failed to load submissions:', error);
+      Alert.alert(
+        'Could not load submissions',
+        error?.message || 'Please try again.'
+      );
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
+  }, []);
+
+  useEffect(() => {
+    loadSubmissions();
+  }, [loadSubmissions]);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadSubmissions();
+  };
+
+  const resetForm = () => {
+    setSelectedPeriod('');
+    setComments('');
+    setSelectedFile(null);
+    setPeriodDropdownOpen(false);
   };
 
   const handlePickFile = async () => {
@@ -64,21 +172,75 @@ export default function SubmissionsScreen({ navigation }) {
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         ],
         copyToCacheDirectory: true,
+        multiple: false,
       });
+
       if (result.canceled) return;
-      const file = result.assets[0];
-      const sizeMB = file.size
-        ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
-        : 'Unknown size';
+
+      const file = result.assets?.[0];
+
+      if (!file) {
+        Alert.alert('No File Selected', 'Please select a valid PDF or DOCX file.');
+        return;
+      }
+
       setSelectedFile({
         name: file.name,
-        size: sizeMB,
+        size: file.size || 0,
+        sizeLabel: formatFileSize(file.size),
         uri: file.uri,
-        mimeType: file.mimeType,
+        mimeType: file.mimeType || 'application/octet-stream',
       });
     } catch (error) {
       Alert.alert('Error', 'Could not open file picker.');
     }
+  };
+
+  const uploadDocument = async () => {
+    if (!selectedFile) return null;
+
+    const formData = new FormData();
+
+    formData.append('file', {
+      uri: selectedFile.uri,
+      name: selectedFile.name,
+      type: selectedFile.mimeType,
+    });
+
+    const response = await api.post('/documents/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+
+    return response?.data?.document || null;
+  };
+
+  const createAndSubmitProgressReport = async ({ document }) => {
+    const descriptionPayload = {
+      reportingPeriod: selectedPeriod,
+      comments: comments.trim(),
+      fileName: selectedFile?.name || document?.original_filename || '',
+      fileSize: selectedFile?.sizeLabel || '',
+      mimeType: selectedFile?.mimeType || document?.mime_type || '',
+      documentId: document?.id || null,
+    };
+
+    const createResponse = await api.post('/submissions', {
+      submission_type: 'PROGRESS_REPORT',
+      title: selectedFile?.name || 'Progress Report',
+      description: JSON.stringify(descriptionPayload),
+    });
+
+    const submission = createResponse?.data?.submission;
+
+    if (!submission?.id) {
+      throw new Error('Submission was created, but no submission ID was returned.');
+    }
+
+    await api.post(`/submissions/${submission.id}/submit`, {});
+
+    return submission;
   };
 
   const handleSubmit = async () => {
@@ -86,43 +248,134 @@ export default function SubmissionsScreen({ navigation }) {
       Alert.alert('Missing Field', 'Please select a reporting period.');
       return;
     }
+
     if (!selectedFile) {
-      Alert.alert('Missing File', 'Please select a file to upload.');
+      Alert.alert('Missing File', 'Please select a PDF or DOCX file to upload.');
       return;
     }
+
     setSubmitting(true);
+
     try {
-      const newSubmission = await submitProgressReport(CURRENT_STUDENT.id, {
-        title: selectedFile.name,
-        fileSize: selectedFile.size,
-        reportingPeriod: selectedPeriod,
-        comments,
+      const document = await uploadDocument();
+
+      await createAndSubmitProgressReport({
+        document,
       });
-      setSubmissions((prev) => [newSubmission, ...prev]);
-      setSelectedPeriod('');
-      setComments('');
-      setSelectedFile(null);
+
+      resetForm();
       setUploadModalVisible(false);
-      Alert.alert('Success', 'Report submitted successfully.');
+
+      await loadSubmissions();
+
+      Alert.alert('Success', 'Progress report submitted successfully.');
     } catch (error) {
-      Alert.alert('Error', 'Failed to submit. Please try again.');
+      Alert.alert(
+        'Submission Failed',
+        error?.message || 'Failed to submit. Please try again.'
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
-  const formatDate = (dateStr) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
+  const renderEmptyState = () => (
+    <View style={styles.emptyState}>
+      <View style={styles.emptyIcon}>
+        <Ionicons name="document-text-outline" size={34} color="#1E56A0" />
+      </View>
+
+      <Text style={styles.emptyTitle}>No submissions yet</Text>
+      <Text style={styles.emptyText}>
+        Upload your first progress report to start the workflow.
+      </Text>
+
+      <TouchableOpacity
+        style={styles.emptyButton}
+        onPress={() => setUploadModalVisible(true)}
+      >
+        <Ionicons name="add" size={18} color="#FFFFFF" />
+        <Text style={styles.emptyButtonText}>Upload Report</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderSubmissionCard = (item) => {
+    const details = parseDescription(item.description);
+    const status = item.current_state || item.workflow_state || 'DRAFT';
+    const statusColor = getStatusColor(status);
+    const displayFileName = details.fileName || item.title || 'Progress Report';
+    const displayFileSize = details.fileSize || 'Metadata saved';
+
+    return (
+      <View key={item.id} style={styles.card}>
+        <View style={styles.fileRow}>
+          <View style={styles.fileIcon}>
+            <Ionicons name="document-text" size={24} color="#1E56A0" />
+          </View>
+
+          <View style={styles.fileInfo}>
+            <Text style={styles.fileName} numberOfLines={1}>
+              {displayFileName}
+            </Text>
+
+            <Text style={styles.fileMeta}>
+              {displayFileSize} · {formatDate(item.created_at)}
+            </Text>
+          </View>
+
+          <View
+            style={[
+              styles.statusBadge,
+              {
+                backgroundColor: statusColor,
+              },
+            ]}
+          >
+            <Text style={styles.statusText}>{getStatusLabel(status)}</Text>
+          </View>
+        </View>
+
+        <View style={styles.detailRow}>
+          <Ionicons name="calendar-outline" size={14} color="#6B7280" />
+          <Text style={styles.detailText}>
+            Period: {details.reportingPeriod || 'N/A'}
+          </Text>
+        </View>
+
+        <View style={styles.detailRow}>
+          <Ionicons name="layers-outline" size={14} color="#6B7280" />
+          <Text style={styles.detailText}>
+            Version: {item.current_version_no || 1}
+          </Text>
+        </View>
+
+        {!!details.comments && (
+          <View style={styles.detailRow}>
+            <Ionicons name="chatbubble-outline" size={14} color="#6B7280" />
+            <Text style={styles.detailText} numberOfLines={2}>
+              {details.comments}
+            </Text>
+          </View>
+        )}
+
+        {status !== 'DRAFT' && (
+          <View style={styles.workflowNotice}>
+            <Ionicons name="lock-closed-outline" size={14} color="#1E56A0" />
+            <Text style={styles.workflowNoticeText}>
+              This submission is now in workflow.
+            </Text>
+          </View>
+        )}
+      </View>
+    );
   };
 
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#1E56A0" />
+        <Text style={styles.loadingText}>Loading submissions...</Text>
       </View>
     );
   }
@@ -143,122 +396,85 @@ export default function SubmissionsScreen({ navigation }) {
         }
       />
 
-      <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
-        <Text style={styles.count}>{submissions.length} submissions</Text>
+      <ScrollView
+        style={styles.body}
+        contentContainerStyle={[
+          styles.bodyContent,
+          submissions.length === 0 && styles.emptyBodyContent,
+        ]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+        }
+      >
+        <Text style={styles.count}>{submissionCountText}</Text>
 
-        {submissions.map((item) => (
-          <View key={item.id} style={styles.card}>
-            <View style={styles.fileRow}>
-              <View style={styles.fileIcon}>
-                <Ionicons name="document-text" size={24} color="#1E56A0" />
-              </View>
-              <View style={styles.fileInfo}>
-                <Text style={styles.fileName} numberOfLines={1}>
-                  {item.title}
-                </Text>
-                <Text style={styles.fileMeta}>
-                  {item.fileSize} · {formatDate(item.submittedAt)}
-                </Text>
-              </View>
-              <View
-                style={[
-                  styles.statusBadge,
-                  { backgroundColor: getStatusColor(item.status) },
-                ]}
-              >
-                <Text style={styles.statusText}>{item.status}</Text>
-              </View>
-            </View>
-
-            <View style={styles.detailRow}>
-              <Ionicons name="calendar-outline" size={14} color="#6B7280" />
-              <Text style={styles.detailText}>
-                Period: {item.reportingPeriod}
-              </Text>
-            </View>
-
-            {!!item.comments && (
-              <View style={styles.detailRow}>
-                <Ionicons
-                  name="chatbubble-outline"
-                  size={14}
-                  color="#6B7280"
-                />
-                <Text style={styles.detailText} numberOfLines={2}>
-                  {item.comments}
-                </Text>
-              </View>
-            )}
-
-            {!!item.supervisorComments && (
-              <View style={styles.supervisorFeedback}>
-                <Text style={styles.supervisorFeedbackLabel}>
-                  Supervisor feedback
-                </Text>
-                <Text style={styles.supervisorFeedbackText}>
-                  {item.supervisorComments}
-                </Text>
-              </View>
-            )}
-          </View>
-        ))}
+        {submissions.length === 0
+          ? renderEmptyState()
+          : submissions.map(renderSubmissionCard)}
       </ScrollView>
 
-      {/* ── UPLOAD MODAL ── */}
       <Modal
         visible={uploadModalVisible}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setUploadModalVisible(false)}
+        onRequestClose={() => {
+          if (!submitting) {
+            setUploadModalVisible(false);
+          }
+        }}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setUploadModalVisible(false)}>
-              <Ionicons name="close" size={24} color="#0D1B2A" />
+            <TouchableOpacity
+              onPress={() => {
+                if (!submitting) {
+                  setUploadModalVisible(false);
+                }
+              }}
+              disabled={submitting}
+            >
+              <Ionicons name="close" size={24} color="#FFFFFF" />
             </TouchableOpacity>
+
             <Text style={styles.modalTitle}>Upload Progress Report</Text>
+
             <View style={{ width: 24 }} />
           </View>
 
           <ScrollView
             style={styles.modalBody}
+            contentContainerStyle={styles.modalBodyContent}
             showsVerticalScrollIndicator={false}
           >
-            {/* File upload area */}
             <TouchableOpacity
               style={styles.fileUploadArea}
               onPress={handlePickFile}
+              disabled={submitting}
             >
               {selectedFile ? (
                 <View style={styles.selectedFileRow}>
-                  <Ionicons
-                    name="document-text"
-                    size={32}
-                    color="#1E56A0"
-                  />
+                  <Ionicons name="document-text" size={32} color="#1E56A0" />
+
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.selectedFileName}>
+                    <Text style={styles.selectedFileName} numberOfLines={2}>
                       {selectedFile.name}
                     </Text>
                     <Text style={styles.selectedFileSize}>
-                      {selectedFile.size}
+                      {selectedFile.sizeLabel}
                     </Text>
                   </View>
-                  <TouchableOpacity onPress={() => setSelectedFile(null)}>
-                    <Ionicons
-                      name="close-circle"
-                      size={20}
-                      color="#EF4444"
-                    />
+
+                  <TouchableOpacity
+                    onPress={() => setSelectedFile(null)}
+                    disabled={submitting}
+                  >
+                    <Ionicons name="close-circle" size={22} color="#EF4444" />
                   </TouchableOpacity>
                 </View>
               ) : (
                 <>
-                  <Ionicons
-                    name="share-outline"
-                    size={40}
-                    color="#6B7280"
-                  />
+                  <Ionicons name="cloud-upload-outline" size={42} color="#6B7280" />
                   <Text style={styles.uploadAreaText}>
                     Tap to upload file: PDF/DOCX only
                   </Text>
@@ -266,11 +482,12 @@ export default function SubmissionsScreen({ navigation }) {
               )}
             </TouchableOpacity>
 
-            {/* Reporting Period */}
             <Text style={styles.fieldLabel}>Reporting Period</Text>
+
             <TouchableOpacity
               style={styles.dropdown}
               onPress={() => setPeriodDropdownOpen(!periodDropdownOpen)}
+              disabled={submitting}
             >
               <Text
                 style={[
@@ -280,6 +497,7 @@ export default function SubmissionsScreen({ navigation }) {
               >
                 {selectedPeriod || 'Select'}
               </Text>
+
               <Ionicons
                 name={periodDropdownOpen ? 'chevron-up' : 'chevron-down'}
                 size={20}
@@ -287,7 +505,6 @@ export default function SubmissionsScreen({ navigation }) {
               />
             </TouchableOpacity>
 
-            
             {periodDropdownOpen && (
               <View style={styles.dropdownOptions}>
                 {REPORTING_PERIODS.map((period) => (
@@ -298,8 +515,10 @@ export default function SubmissionsScreen({ navigation }) {
                       setSelectedPeriod(period);
                       setPeriodDropdownOpen(false);
                     }}
+                    disabled={submitting}
                   >
                     <Text style={styles.dropdownOptionText}>{period}</Text>
+
                     {selectedPeriod === period && (
                       <Ionicons name="checkmark" size={16} color="#1E56A0" />
                     )}
@@ -308,28 +527,32 @@ export default function SubmissionsScreen({ navigation }) {
               </View>
             )}
 
-            {/* Comments */}
             <Text style={styles.fieldLabel}>Comments</Text>
+
             <TextInput
               style={styles.textArea}
-              placeholder="Type here...."
+              placeholder="Type here..."
               placeholderTextColor="#9BA4B5"
               multiline
               numberOfLines={4}
               value={comments}
               onChangeText={setComments}
               textAlignVertical="top"
+              editable={!submitting}
             />
 
             <TouchableOpacity
-              style={[styles.submitBtn, submitting && { opacity: 0.7 }]}
+              style={[styles.submitBtn, submitting && styles.disabledButton]}
               onPress={handleSubmit}
               disabled={submitting}
             >
               {submitting ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.submitBtnText}>Submit</Text>
+                <>
+                  <Ionicons name="send-outline" size={18} color="#FFFFFF" />
+                  <Text style={styles.submitBtnText}>Submit</Text>
+                </>
               )}
             </TouchableOpacity>
           </ScrollView>
@@ -345,6 +568,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#F0F2F5',
+    gap: 10,
+  },
+  loadingText: {
+    color: '#6B7280',
+    fontSize: 14,
   },
   container: {
     flex: 1,
@@ -365,12 +593,63 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   body: {
-    padding: 16,
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  bodyContent: {
+    paddingTop: 16,
+    paddingBottom: 32,
+  },
+  emptyBodyContent: {
+    flexGrow: 1,
   },
   count: {
     fontSize: 13,
     color: '#6B7280',
     marginBottom: 12,
+  },
+  emptyState: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 36,
+  },
+  emptyIcon: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  emptyTitle: {
+    color: '#0D1B2A',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  emptyText: {
+    color: '#6B7280',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 18,
+  },
+  emptyButton: {
+    backgroundColor: '#1E56A0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  emptyButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   card: {
     backgroundColor: '#FFFFFF',
@@ -413,7 +692,7 @@ const styles = StyleSheet.create({
   statusText: {
     color: '#FFFFFF',
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   detailRow: {
     flexDirection: 'row',
@@ -425,23 +704,21 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     flex: 1,
   },
-  supervisorFeedback: {
-    backgroundColor: '#F0FDF4',
+  workflowNotice: {
+    backgroundColor: '#EFF6FF',
     borderRadius: 8,
     padding: 10,
     borderLeftWidth: 3,
-    borderLeftColor: '#22C55E',
-    gap: 4,
+    borderLeftColor: '#1E56A0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  supervisorFeedbackLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#22C55E',
-    textTransform: 'uppercase',
-  },
-  supervisorFeedbackText: {
+  workflowNoticeText: {
     fontSize: 13,
-    color: '#374151',
+    color: '#1E56A0',
+    flex: 1,
+    fontWeight: '600',
   },
   modalContainer: {
     flex: 1,
@@ -464,7 +741,12 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   modalBody: {
-    padding: 16,
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  modalBodyContent: {
+    paddingTop: 16,
+    paddingBottom: 32,
   },
   fileUploadArea: {
     backgroundColor: '#FFFFFF',
@@ -497,6 +779,7 @@ const styles = StyleSheet.create({
   selectedFileSize: {
     fontSize: 12,
     color: '#6B7280',
+    marginTop: 2,
   },
   fieldLabel: {
     fontSize: 15,
@@ -549,12 +832,18 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     padding: 16,
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 32,
     marginHorizontal: 40,
+    flexDirection: 'row',
+    gap: 8,
   },
   submitBtnText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  disabledButton: {
+    opacity: 0.7,
   },
 });
