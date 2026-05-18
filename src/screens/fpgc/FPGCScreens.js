@@ -19,6 +19,7 @@ import {
 import { api } from '../../api/http';
 import { submissionsApi } from '../../api/submissionsApi';
 import { usersApi } from '../../api/usersApi';
+import { documentsApi } from '../../api/documentsApi';
 import { useAuthStore } from '../../store/authStore';
 
 function formatLabel(value) {
@@ -63,6 +64,8 @@ function parseDescription(description) {
       reportingPeriod: 'N/A',
       fileName: '',
       fileSize: '',
+      mimeType: '',
+      documentId: null,
     };
   }
 
@@ -74,6 +77,12 @@ function parseDescription(description) {
       reportingPeriod: parsed.reportingPeriod || 'N/A',
       fileName: parsed.fileName || '',
       fileSize: parsed.fileSize || '',
+      mimeType: parsed.mimeType || '',
+      documentId:
+        parsed.documentId ||
+        parsed.document_id ||
+        parsed.document?.id ||
+        null,
     };
   } catch {
     return {
@@ -81,6 +90,8 @@ function parseDescription(description) {
       reportingPeriod: 'N/A',
       fileName: '',
       fileSize: '',
+      mimeType: '',
+      documentId: null,
     };
   }
 }
@@ -97,6 +108,8 @@ function normalizeSubmission(item = {}) {
     status: state,
     document: details.fileName || item.title || 'Attached document',
     documentSize: details.fileSize || 'Metadata saved',
+    documentId: details.documentId,
+    mimeType: details.mimeType,
     reportingPeriod: details.reportingPeriod || 'N/A',
     studentComments: details.comments || '',
     student: {
@@ -359,7 +372,33 @@ function FinalDecisionModal({
 }
 
 function SubmissionCard({ item, onApprove, onReject }) {
-  const canDecide = item.status === 'FORWARDED_TO_FPGC';
+  const [openingDocument, setOpeningDocument] = useState(false);
+
+  const canDecide =
+    item.status === 'FORWARDED_TO_FPGC' &&
+    typeof onApprove === 'function' &&
+    typeof onReject === 'function';
+
+  const canOpenDocument = !!item.documentId;
+
+  const handleOpenDocument = async () => {
+    if (!item.documentId) {
+      Alert.alert('No Document', 'This submission does not have a linked uploaded document.');
+      return;
+    }
+
+    try {
+      setOpeningDocument(true);
+      await documentsApi.openDocument(item.documentId, item.document || item.title || 'document');
+    } catch (error) {
+      Alert.alert(
+        'Could not open document',
+        error?.message || 'Please try again.'
+      );
+    } finally {
+      setOpeningDocument(false);
+    }
+  };
 
   return (
     <View style={s.card}>
@@ -395,6 +434,37 @@ function SubmissionCard({ item, onApprove, onReject }) {
           </Text>
           <Text style={s.docSize}>{item.documentSize}</Text>
         </View>
+
+        <TouchableOpacity
+          style={[
+            s.openDocBtn,
+            (!canOpenDocument || openingDocument) && s.openDocBtnDisabled,
+          ]}
+          onPress={handleOpenDocument}
+          disabled={!canOpenDocument || openingDocument}
+        >
+          {openingDocument ? (
+            <ActivityIndicator size="small" color="#1E56A0" />
+          ) : (
+            <>
+              <Ionicons
+                name={canOpenDocument ? 'open-outline' : 'alert-circle-outline'}
+                size={15}
+                color={canOpenDocument ? '#1E56A0' : '#9BA4B5'}
+              />
+              <Text
+                style={[
+                  s.openDocText,
+                  !canOpenDocument && {
+                    color: '#9BA4B5',
+                  },
+                ]}
+              >
+                {canOpenDocument ? 'Open' : 'No File'}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
       </View>
 
       <View style={s.metaRow}>
@@ -429,6 +499,7 @@ function ExternalAssignmentCard({
   const [showEvaluators, setShowEvaluators] = useState(false);
   const [comments, setComments] = useState('Assigned for external thesis evaluation.');
   const [assigning, setAssigning] = useState(false);
+  const [openingDocument, setOpeningDocument] = useState(false);
 
   useEffect(() => {
     if (!selectedEvaluator && evaluators.length > 0) {
@@ -437,6 +508,26 @@ function ExternalAssignmentCard({
   }, [evaluators, selectedEvaluator]);
 
   const canAssign = ['FORWARDED_TO_FPGC', 'APPROVED'].includes(item.status);
+  const canOpenDocument = !!item.documentId;
+
+  const handleOpenDocument = async () => {
+    if (!item.documentId) {
+      Alert.alert('No Document', 'This submission does not have a linked uploaded document.');
+      return;
+    }
+
+    try {
+      setOpeningDocument(true);
+      await documentsApi.openDocument(item.documentId, item.document || item.title || 'document');
+    } catch (error) {
+      Alert.alert(
+        'Could not open document',
+        error?.message || 'Please try again.'
+      );
+    } finally {
+      setOpeningDocument(false);
+    }
+  };
 
   const handleAssign = () => {
     if (!selectedEvaluator?.id) {
@@ -529,6 +620,37 @@ function ExternalAssignmentCard({
           </Text>
           <Text style={s.docSize}>{item.documentSize}</Text>
         </View>
+
+        <TouchableOpacity
+          style={[
+            s.openDocBtn,
+            (!canOpenDocument || openingDocument) && s.openDocBtnDisabled,
+          ]}
+          onPress={handleOpenDocument}
+          disabled={!canOpenDocument || openingDocument}
+        >
+          {openingDocument ? (
+            <ActivityIndicator size="small" color="#1E56A0" />
+          ) : (
+            <>
+              <Ionicons
+                name={canOpenDocument ? 'open-outline' : 'alert-circle-outline'}
+                size={15}
+                color={canOpenDocument ? '#1E56A0' : '#9BA4B5'}
+              />
+              <Text
+                style={[
+                  s.openDocText,
+                  !canOpenDocument && {
+                    color: '#9BA4B5',
+                  },
+                ]}
+              >
+                {canOpenDocument ? 'Open' : 'No File'}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
       </View>
 
       <Text style={s.smallLabel}>External Evaluator</Text>
@@ -736,7 +858,7 @@ export function FPGCDashboard({ navigation }) {
         <Text style={s.sectionTitle}>Recent FPGC Items</Text>
 
         {submissions.slice(0, 3).map((item) => (
-          <SubmissionCard key={item.id} item={item} onApprove={() => {}} onReject={() => {}} />
+          <SubmissionCard key={item.id} item={item} />
         ))}
 
         {submissions.length === 0 && (
@@ -780,7 +902,7 @@ export function FPGCApplications({ navigation }) {
           <RefreshControl refreshing={refreshing} onRefresh={refresh} />
         }
         renderItem={({ item }) => (
-          <SubmissionCard item={item} onApprove={() => {}} onReject={() => {}} />
+          <SubmissionCard item={item} />
         )}
         ListEmptyComponent={
           <View style={s.emptyCard}>
@@ -1239,6 +1361,29 @@ const s = StyleSheet.create({
   docInfo: { flex: 1 },
   docName: { color: '#0D1B2A', fontSize: 13, fontWeight: '600' },
   docSize: { color: '#6B7280', fontSize: 12, marginTop: 2 },
+  openDocBtn: {
+    minWidth: 76,
+    minHeight: 36,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 5,
+  },
+  openDocBtnDisabled: {
+    backgroundColor: '#F9FAFB',
+    borderColor: '#E5E7EB',
+  },
+  openDocText: {
+    color: '#1E56A0',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   actionRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
   rejectOutlineBtn: {

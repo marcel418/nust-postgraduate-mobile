@@ -14,8 +14,9 @@ import {
 } from 'react-native';
 
 import HODHeader from '../../components/HODHeader';
-import { submissionsApi } from '../../api/submissionsApi';
 import { api } from '../../api/http';
+import { documentsApi } from '../../api/documentsApi';
+import { submissionsApi } from '../../api/submissionsApi';
 import { useAuthStore } from '../../store/authStore';
 
 const HOD_VISIBLE_STATES = [
@@ -23,6 +24,9 @@ const HOD_VISIBLE_STATES = [
   'UNDER_INTERNAL_EVAL',
   'INTERNAL_EVAL_COMPLETED',
   'FORWARDED_TO_FPGCR',
+  'FORWARDED_TO_FPGC',
+  'EXTERNAL_EVAL_ASSIGNED',
+  'EXTERNAL_EVAL_COMPLETED',
   'REVISIONS_REQUIRED',
   'APPROVED',
   'REJECTED',
@@ -30,7 +34,9 @@ const HOD_VISIBLE_STATES = [
 
 const FILTER_MAP = {
   WITH_HOD: 'APPROVED_BY_SUPERVISOR',
+  APPROVED_BY_SUPERVISOR: 'APPROVED_BY_SUPERVISOR',
   UNDER_INTERNAL_EVAL: 'UNDER_INTERNAL_EVAL',
+  INTERNAL_EVAL_COMPLETED: 'INTERNAL_EVAL_COMPLETED',
   APPROVED: 'APPROVED',
   REJECTED: 'REJECTED',
 };
@@ -42,6 +48,9 @@ const getStatusColor = (status) =>
     UNDER_INTERNAL_EVAL: '#7C3AED',
     INTERNAL_EVAL_COMPLETED: '#22C55E',
     FORWARDED_TO_FPGCR: '#1E56A0',
+    FORWARDED_TO_FPGC: '#1E56A0',
+    EXTERNAL_EVAL_ASSIGNED: '#7C3AED',
+    EXTERNAL_EVAL_COMPLETED: '#22C55E',
     REVISIONS_REQUIRED: '#F97316',
     APPROVED: '#22C55E',
     REJECTED: '#EF4444',
@@ -54,6 +63,9 @@ const getStatusLabel = (status) =>
     UNDER_INTERNAL_EVAL: 'Under Internal Evaluation',
     INTERNAL_EVAL_COMPLETED: 'Internal Evaluation Complete',
     FORWARDED_TO_FPGCR: 'Forwarded to FPGC-R',
+    FORWARDED_TO_FPGC: 'Forwarded to FPGC',
+    EXTERNAL_EVAL_ASSIGNED: 'External Evaluator Assigned',
+    EXTERNAL_EVAL_COMPLETED: 'External Evaluation Complete',
     REVISIONS_REQUIRED: 'Revisions Required',
     APPROVED: 'Approved',
     REJECTED: 'Rejected',
@@ -89,6 +101,7 @@ function parseDescription(description) {
       reportingPeriod: 'N/A',
       fileName: '',
       fileSize: '',
+      documentId: null,
     };
   }
 
@@ -100,6 +113,7 @@ function parseDescription(description) {
       reportingPeriod: parsed.reportingPeriod || 'N/A',
       fileName: parsed.fileName || '',
       fileSize: parsed.fileSize || '',
+      documentId: parsed.documentId || parsed.document_id || null,
     };
   } catch {
     return {
@@ -107,24 +121,26 @@ function parseDescription(description) {
       reportingPeriod: 'N/A',
       fileName: '',
       fileSize: '',
+      documentId: null,
     };
   }
 }
 
-function normalizeSubmission(item) {
+function normalizeSubmission(item = {}) {
   const details = parseDescription(item.description);
-  const state = item.current_state || item.workflow_state || 'UNKNOWN';
-  const studentId = item.student_id || item.student?.id || 'N/A';
+  const state = item.current_state || item.workflow_state || item.status || 'UNKNOWN';
+  const studentId = item.student_id || item.student?.id || item.studentId || 'N/A';
 
   return {
     ...item,
     status: state,
-    type: formatLabel(item.submission_type),
+    type: formatLabel(item.submission_type || item.type),
     title: item.title || details.fileName || 'Submission',
-    document: details.fileName || item.title || 'Attached document',
-    documentSize: details.fileSize || 'Metadata saved',
-    reportingPeriod: details.reportingPeriod || 'N/A',
-    comments: details.comments || '',
+    document: details.fileName || item.document || item.title || 'Attached document',
+    documentSize: details.fileSize || item.documentSize || 'Metadata saved',
+    documentId: details.documentId || item.documentId || item.document_id || null,
+    reportingPeriod: details.reportingPeriod || item.reportingPeriod || 'N/A',
+    comments: details.comments || item.comments || '',
     deadline: item.updated_at || item.created_at,
     student: {
       id: studentId,
@@ -132,7 +148,10 @@ function normalizeSubmission(item) {
         item.student_name ||
         item.student?.name ||
         `Student ${String(studentId).slice(0, 8)}`,
-      course: item.student_course || item.student?.course || 'Postgraduate Programme',
+      course:
+        item.student_course ||
+        item.student?.course ||
+        'Postgraduate Programme',
     },
     supervisor: {
       id: item.updated_by || null,
@@ -155,7 +174,100 @@ async function getHODBackendSubmissions() {
     );
 }
 
-// ─── Submissions Screen ──────────────────────────────────────────────────────
+function HODSubmissionCard({ item, navigation, showDocumentButton = false }) {
+  const [opening, setOpening] = useState(false);
+
+  const handleOpenDocument = async () => {
+    if (!item.documentId) {
+      Alert.alert('No Document', 'This submission does not have a linked uploaded document.');
+      return;
+    }
+
+    try {
+      setOpening(true);
+      await documentsApi.openDocument(item.documentId, item.document);
+    } catch (error) {
+      Alert.alert('Could not open document', error?.message || 'Please try again.');
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  return (
+    <TouchableOpacity
+      style={s.card}
+      onPress={() => navigation.navigate('HODReviewSubmission', { submission: item })}
+      activeOpacity={0.88}
+    >
+      <View style={s.cardTop}>
+        <View style={s.typePill}>
+          <Text style={s.typePillText}>{item.type}</Text>
+        </View>
+
+        <View style={[s.statusPill, { backgroundColor: getStatusColor(item.status) }]}> 
+          <Text style={s.statusPillText}>{getStatusLabel(item.status)}</Text>
+        </View>
+      </View>
+
+      <Text style={s.title} numberOfLines={2}>
+        {item.title}
+      </Text>
+
+      <View style={s.meta}>
+        <View style={s.metaRow}>
+          <Ionicons name="person-outline" size={14} color="#6B7280" />
+          <Text style={s.metaText}> {item.student.name}</Text>
+        </View>
+
+        <View style={s.metaRow}>
+          <Ionicons name="school-outline" size={14} color="#6B7280" />
+          <Text style={s.metaText}> {item.student.course}</Text>
+        </View>
+
+        <View style={s.metaRow}>
+          <Ionicons name="calendar-outline" size={14} color="#F59E0B" />
+          <Text style={[s.metaText, { color: '#F59E0B' }]}> {formatDate(item.updated_at || item.created_at)}</Text>
+        </View>
+      </View>
+
+      {!!item.comments && (
+        <View style={s.feedbackBox}>
+          <Text style={s.feedbackLabel}>Student comments</Text>
+          <Text style={s.feedbackText} numberOfLines={2}>
+            {item.comments}
+          </Text>
+        </View>
+      )}
+
+      {showDocumentButton && (
+        <View style={s.inlineActions}>
+          <TouchableOpacity
+            style={[s.openFileBtn, (!item.documentId || opening) && s.disabled]}
+            onPress={handleOpenDocument}
+            disabled={!item.documentId || opening}
+          >
+            {opening ? (
+              <ActivityIndicator color="#1E56A0" size="small" />
+            ) : (
+              <>
+                <Ionicons name="open-outline" size={16} color="#1E56A0" />
+                <Text style={s.openFileText}>{item.documentId ? 'Open File' : 'No File'}</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={s.reviewInlineBtn}
+            onPress={() => navigation.navigate('HODReviewSubmission', { submission: item })}
+          >
+            <Text style={s.reviewInlineText}>Review</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+}
+
 export function HODSubmissionsScreen({ navigation, route }) {
   const incomingFilter = route?.params?.filter || null;
   const mappedFilter = FILTER_MAP[incomingFilter] || incomingFilter;
@@ -167,16 +279,10 @@ export function HODSubmissionsScreen({ navigation, route }) {
   const load = useCallback(async () => {
     try {
       const data = await getHODBackendSubmissions();
-
-      setSubmissions(
-        mappedFilter ? data.filter((item) => item.status === mappedFilter) : data
-      );
+      setSubmissions(mappedFilter ? data.filter((item) => item.status === mappedFilter) : data);
     } catch (error) {
       console.error(error);
-      Alert.alert(
-        'Could not load submissions',
-        error?.message || 'Please try again.'
-      );
+      Alert.alert('Could not load submissions', error?.message || 'Please try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -213,66 +319,7 @@ export function HODSubmissionsScreen({ navigation, route }) {
           />
         }
         renderItem={({ item }) => (
-          <TouchableOpacity
-            style={s.card}
-            onPress={() =>
-              navigation.navigate('HODReviewSubmission', {
-                submission: item,
-              })
-            }
-          >
-            <View style={s.cardTop}>
-              <View style={s.typePill}>
-                <Text style={s.typePillText}>{item.type}</Text>
-              </View>
-
-              <View
-                style={[
-                  s.statusPill,
-                  {
-                    backgroundColor: getStatusColor(item.status),
-                  },
-                ]}
-              >
-                <Text style={s.statusPillText}>
-                  {getStatusLabel(item.status)}
-                </Text>
-              </View>
-            </View>
-
-            <Text style={s.title} numberOfLines={2}>
-              {item.title}
-            </Text>
-
-            <View style={s.meta}>
-              <View style={s.metaRow}>
-                <Ionicons name="person-outline" size={14} color="#6B7280" />
-                <Text style={s.metaText}> {item.student.name}</Text>
-              </View>
-
-              <View style={s.metaRow}>
-                <Ionicons name="school-outline" size={14} color="#6B7280" />
-                <Text style={s.metaText}> {item.supervisor.name}</Text>
-              </View>
-
-              <View style={s.metaRow}>
-                <Ionicons name="calendar-outline" size={14} color="#F59E0B" />
-                <Text style={[s.metaText, { color: '#F59E0B' }]}>
-                  {' '}
-                  {formatDate(item.updated_at || item.created_at)}
-                </Text>
-              </View>
-            </View>
-
-            {!!item.comments && (
-              <View style={s.feedbackBox}>
-                <Text style={s.feedbackLabel}>Student comments</Text>
-                <Text style={s.feedbackText} numberOfLines={2}>
-                  {item.comments}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          <HODSubmissionCard item={item} navigation={navigation} showDocumentButton />
         )}
         ListEmptyComponent={
           <View style={s.empty}>
@@ -285,7 +332,6 @@ export function HODSubmissionsScreen({ navigation, route }) {
   );
 }
 
-// ─── Assignments Screen ───────────────────────────────────────────────────────
 export function HODAssignmentsScreen({ navigation }) {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -294,16 +340,10 @@ export function HODAssignmentsScreen({ navigation }) {
   const load = useCallback(async () => {
     try {
       const data = await getHODBackendSubmissions();
-
-      setSubmissions(
-        data.filter((item) => item.status === 'APPROVED_BY_SUPERVISOR')
-      );
+      setSubmissions(data.filter((item) => item.status === 'APPROVED_BY_SUPERVISOR'));
     } catch (error) {
       console.error(error);
-      Alert.alert(
-        'Could not load assignments',
-        error?.message || 'Please try again.'
-      );
+      Alert.alert('Could not load assignments', error?.message || 'Please try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -342,23 +382,14 @@ export function HODAssignmentsScreen({ navigation }) {
         renderItem={({ item }) => (
           <View style={s.card}>
             <View style={s.assignmentTop}>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={s.studentName}>{item.student.name}</Text>
                 <Text style={s.infoText}>Student ID: {item.student.id}</Text>
                 <Text style={s.infoText}>Course: {item.student.course}</Text>
               </View>
 
-              <View
-                style={[
-                  s.statusPill,
-                  {
-                    backgroundColor: getStatusColor(item.status),
-                  },
-                ]}
-              >
-                <Text style={s.statusPillText}>
-                  {getStatusLabel(item.status)}
-                </Text>
+              <View style={[s.statusPill, { backgroundColor: getStatusColor(item.status) }]}> 
+                <Text style={s.statusPillText}>{getStatusLabel(item.status)}</Text>
               </View>
             </View>
 
@@ -366,59 +397,41 @@ export function HODAssignmentsScreen({ navigation }) {
 
             <View style={s.docRow}>
               <View style={s.docIconBox}>
-                <Ionicons
-                  name="document-attach-outline"
-                  size={22}
-                  color="#1E56A0"
-                />
+                <Ionicons name="document-attach-outline" size={22} color="#1E56A0" />
               </View>
 
               <View style={s.docInfo}>
                 <Text style={s.docName} numberOfLines={1}>
                   {item.document}
                 </Text>
-                <Text style={s.docSize}>
-                  {item.documentSize} · {item.type}
-                </Text>
+                <Text style={s.docSize}>{item.documentSize} · {item.type}</Text>
               </View>
-
-              <TouchableOpacity
-                style={s.openBtn}
-                onPress={() =>
-                  navigation.navigate('HODReviewSubmission', {
-                    submission: item,
-                  })
-                }
-              >
-                <Text style={s.openBtnText}>Open</Text>
-              </TouchableOpacity>
             </View>
 
             <View style={s.divider} />
 
-            <TouchableOpacity
-              style={s.assignBtn}
-              onPress={() =>
-                navigation.navigate('HODAssignInternalEvaluator', {
-                  submission: item,
-                })
-              }
-            >
-              <Ionicons name="person-add-outline" size={18} color="#FFFFFF" />
-              <Text style={s.assignBtnText}>Assign Internal Evaluator</Text>
-            </TouchableOpacity>
+            <View style={s.inlineActions}>
+              <TouchableOpacity
+                style={s.reviewInlineBtn}
+                onPress={() => navigation.navigate('HODReviewSubmission', { submission: item })}
+              >
+                <Text style={s.reviewInlineText}>Review</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={s.assignBtn}
+                onPress={() => navigation.navigate('HODAssignInternalEvaluator', { submission: item })}
+              >
+                <Ionicons name="person-add-outline" size={18} color="#FFFFFF" />
+                <Text style={s.assignBtnText}>Assign Internal Evaluator</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
         ListEmptyComponent={
           <View style={s.empty}>
-            <Ionicons
-              name="checkmark-circle-outline"
-              size={48}
-              color="#22C55E"
-            />
-            <Text style={s.emptyText}>
-              No submissions are currently awaiting evaluator assignment.
-            </Text>
+            <Ionicons name="checkmark-circle-outline" size={48} color="#22C55E" />
+            <Text style={s.emptyText}>No submissions are currently awaiting evaluator assignment.</Text>
           </View>
         }
       />
@@ -426,7 +439,6 @@ export function HODAssignmentsScreen({ navigation }) {
   );
 }
 
-// ─── Notifications Screen ─────────────────────────────────────────────────────
 export function HODNotificationsScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -444,10 +456,7 @@ export function HODNotificationsScreen({ navigation }) {
       );
     } catch (error) {
       console.error(error);
-      Alert.alert(
-        'Could not load notifications',
-        error?.message || 'Please try again.'
-      );
+      Alert.alert('Could not load notifications', error?.message || 'Please try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -465,10 +474,7 @@ export function HODNotificationsScreen({ navigation }) {
       await api.post(`/notifications/${item.id}/read`);
       await loadNotifications();
     } catch (error) {
-      Alert.alert(
-        'Could not update notification',
-        error?.message || 'Please try again.'
-      );
+      Alert.alert('Could not update notification', error?.message || 'Please try again.');
     }
   };
 
@@ -515,29 +521,20 @@ export function HODNotificationsScreen({ navigation }) {
                 <Text
                   style={[
                     s.notifMessage,
-                    !read && {
-                      fontWeight: '600',
-                      color: '#0D1B2A',
-                    },
+                    !read && { fontWeight: '600', color: '#0D1B2A' },
                   ]}
                 >
                   {item.message || item.title}
                 </Text>
 
-                <Text style={s.notifTime}>
-                  {formatDate(item.created_at)}
-                </Text>
+                <Text style={s.notifTime}>{formatDate(item.created_at)}</Text>
               </View>
             </TouchableOpacity>
           );
         }}
         ListEmptyComponent={
           <View style={s.empty}>
-            <Ionicons
-              name="notifications-off-outline"
-              size={48}
-              color="#9BA4B5"
-            />
+            <Ionicons name="notifications-off-outline" size={48} color="#9BA4B5" />
             <Text style={s.emptyText}>No notifications yet.</Text>
           </View>
         }
@@ -546,17 +543,17 @@ export function HODNotificationsScreen({ navigation }) {
   );
 }
 
-// ─── Profile Screen ───────────────────────────────────────────────────────────
 export function HODProfileScreen({ navigation }) {
   const logout = useAuthStore((state) => state.logout);
   const authUser = useAuthStore((state) => state.user);
+  const roles = useAuthStore((state) => state.roles);
 
   const [signingOut, setSigningOut] = useState(false);
 
   const profile = {
     name: authUser?.name || 'Prof. Ndapewa Iyambo',
     email: authUser?.email || 'hod@nust.na',
-    role: 'Head of Department',
+    role: Array.isArray(roles) && roles.length > 0 ? roles[0] : 'Head of Department',
     department: 'Software Engineering',
     phone: '+264 61 207 2000',
   };
@@ -571,10 +568,7 @@ export function HODProfileScreen({ navigation }) {
 
   const handleLogout = () => {
     Alert.alert('Log Out', 'Are you sure you want to log out?', [
-      {
-        text: 'Cancel',
-        style: 'cancel',
-      },
+      { text: 'Cancel', style: 'cancel' },
       {
         text: 'Log Out',
         style: 'destructive',
@@ -583,10 +577,7 @@ export function HODProfileScreen({ navigation }) {
             setSigningOut(true);
             await logout();
           } catch (error) {
-            Alert.alert(
-              'Logout Failed',
-              error?.message || 'Could not log out. Please try again.'
-            );
+            Alert.alert('Logout Failed', error?.message || 'Could not log out. Please try again.');
           } finally {
             setSigningOut(false);
           }
@@ -607,38 +598,18 @@ export function HODProfileScreen({ navigation }) {
         <Text style={s.profileName}>{profile.name}</Text>
 
         <View style={s.rolePill}>
-          <Text style={s.rolePillText}>{profile.role}</Text>
+          <Text style={s.rolePillText}>{formatLabel(profile.role)}</Text>
         </View>
       </View>
 
       <View style={s.infoCard}>
         {[
-          {
-            icon: 'mail-outline',
-            label: 'Email',
-            value: profile.email,
-          },
-          {
-            icon: 'business-outline',
-            label: 'Department',
-            value: profile.department,
-          },
-          {
-            icon: 'call-outline',
-            label: 'Phone',
-            value: profile.phone,
-          },
+          { icon: 'mail-outline', label: 'Email', value: profile.email },
+          { icon: 'business-outline', label: 'Department', value: profile.department },
+          { icon: 'call-outline', label: 'Phone', value: profile.phone },
         ].map((row, index, array) => (
-          <View
-            key={row.label}
-            style={[s.infoRow, index < array.length - 1 && s.infoRowBorder]}
-          >
-            <Ionicons
-              name={row.icon}
-              size={20}
-              color="#1E56A0"
-              style={{ width: 28 }}
-            />
+          <View key={row.label} style={[s.infoRow, index < array.length - 1 && s.infoRowBorder]}>
+            <Ionicons name={row.icon} size={20} color="#1E56A0" style={{ width: 28 }} />
 
             <View>
               <Text style={s.infoLabel}>{row.label}</Text>
@@ -667,127 +638,44 @@ export function HODProfileScreen({ navigation }) {
 }
 
 const s = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F0F2F5',
-  },
+  container: { flex: 1, backgroundColor: '#F0F2F5' },
   loading: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#F0F2F5',
   },
-  list: {
-    padding: 16,
-    gap: 12,
-    paddingBottom: 40,
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-  },
-  cardTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-    gap: 10,
-  },
+  list: { padding: 16, gap: 12, paddingBottom: 40 },
+  card: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16 },
+  cardTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10, gap: 10 },
   typePill: {
     backgroundColor: '#0D1B2A',
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 4,
   },
-  typePillText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
+  typePillText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
   statusPill: {
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 4,
     alignSelf: 'flex-start',
   },
-  statusPillText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  title: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#0D1B2A',
-    lineHeight: 22,
-    marginBottom: 10,
-  },
-  meta: {
-    gap: 5,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  metaText: {
-    fontSize: 13,
-    color: '#6B7280',
-  },
-  feedbackBox: {
-    backgroundColor: '#F9FAFB',
-    borderRadius: 10,
-    padding: 10,
-    marginTop: 12,
-    gap: 4,
-  },
-  feedbackLabel: {
-    color: '#6B7280',
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  feedbackText: {
-    color: '#374151',
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  empty: {
-    alignItems: 'center',
-    paddingTop: 80,
-    gap: 12,
-  },
-  emptyText: {
-    fontSize: 15,
-    color: '#6B7280',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  assignmentTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  studentName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0D1B2A',
-    marginBottom: 4,
-  },
-  infoText: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginBottom: 2,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#F3F4F6',
-    marginVertical: 12,
-  },
-  docRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
+  statusPillText: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
+  title: { fontSize: 15, fontWeight: '600', color: '#0D1B2A', lineHeight: 22, marginBottom: 10 },
+  meta: { gap: 5 },
+  metaRow: { flexDirection: 'row', alignItems: 'center' },
+  metaText: { fontSize: 13, color: '#6B7280' },
+  feedbackBox: { backgroundColor: '#F9FAFB', borderRadius: 10, padding: 10, marginTop: 12, gap: 4 },
+  feedbackLabel: { color: '#6B7280', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
+  feedbackText: { color: '#374151', fontSize: 13, lineHeight: 19 },
+  empty: { alignItems: 'center', paddingTop: 80, gap: 12, paddingHorizontal: 24 },
+  emptyText: { fontSize: 15, color: '#6B7280', textAlign: 'center', lineHeight: 20 },
+  assignmentTop: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  studentName: { fontSize: 16, fontWeight: '600', color: '#0D1B2A', marginBottom: 4 },
+  infoText: { fontSize: 13, color: '#6B7280', marginBottom: 2 },
+  divider: { height: 1, backgroundColor: '#F3F4F6', marginVertical: 12 },
+  docRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   docIconBox: {
     width: 40,
     height: 40,
@@ -796,31 +684,36 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  docInfo: {
+  docInfo: { flex: 1 },
+  docName: { fontSize: 14, fontWeight: '600', color: '#0D1B2A' },
+  docSize: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  inlineActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  openFileBtn: {
     flex: 1,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
   },
-  docName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#0D1B2A',
+  openFileText: { color: '#1E56A0', fontSize: 13, fontWeight: '700' },
+  reviewInlineBtn: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#1E56A0',
   },
-  docSize: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 2,
-  },
-  openBtn: {
-    backgroundColor: '#1E56A0',
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  openBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 13,
-  },
+  reviewInlineText: { color: '#1E56A0', fontSize: 13, fontWeight: '800' },
   assignBtn: {
+    flex: 1.4,
     backgroundColor: '#1E56A0',
     borderRadius: 12,
     padding: 14,
@@ -829,39 +722,13 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  assignBtnText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  notifCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    flexDirection: 'row',
-    gap: 14,
-  },
-  notifUnread: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#1E56A0',
-  },
-  notifBody: {
-    flex: 1,
-  },
-  notifMessage: {
-    fontSize: 14,
-    color: '#6B7280',
-    lineHeight: 20,
-    marginBottom: 6,
-  },
-  notifTime: {
-    fontSize: 12,
-    color: '#9BA4B5',
-  },
-  avatarSection: {
-    alignItems: 'center',
-    paddingVertical: 28,
-  },
+  assignBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  notifCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, flexDirection: 'row', gap: 14 },
+  notifUnread: { borderLeftWidth: 4, borderLeftColor: '#1E56A0' },
+  notifBody: { flex: 1 },
+  notifMessage: { fontSize: 14, color: '#6B7280', lineHeight: 20, marginBottom: 6 },
+  notifTime: { fontSize: 12, color: '#9BA4B5' },
+  avatarSection: { alignItems: 'center', paddingVertical: 28 },
   avatar: {
     width: 80,
     height: 80,
@@ -871,54 +738,20 @@ const s = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  avatarText: {
-    color: '#FFFFFF',
-    fontSize: 28,
-    fontWeight: 'bold',
-  },
-  profileName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#0D1B2A',
-    marginBottom: 8,
-  },
+  avatarText: { color: '#FFFFFF', fontSize: 28, fontWeight: 'bold' },
+  profileName: { fontSize: 20, fontWeight: 'bold', color: '#0D1B2A', marginBottom: 8 },
   rolePill: {
     backgroundColor: '#EFF6FF',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 6,
   },
-  rolePillText: {
-    fontSize: 13,
-    color: '#1E56A0',
-    fontWeight: '600',
-  },
-  infoCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    marginHorizontal: 16,
-    paddingHorizontal: 16,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    gap: 14,
-  },
-  infoRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  infoLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 2,
-  },
-  infoValue: {
-    fontSize: 14,
-    color: '#0D1B2A',
-    fontWeight: '500',
-  },
+  rolePillText: { fontSize: 13, color: '#1E56A0', fontWeight: '600' },
+  infoCard: { backgroundColor: '#FFFFFF', borderRadius: 16, marginHorizontal: 16, paddingHorizontal: 16 },
+  infoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 14 },
+  infoRowBorder: { borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  infoLabel: { fontSize: 12, color: '#6B7280', marginBottom: 2 },
+  infoValue: { fontSize: 14, color: '#0D1B2A', fontWeight: '500' },
   logoutBtn: {
     marginHorizontal: 16,
     marginTop: 16,
@@ -931,9 +764,6 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  logoutText: {
-    color: '#EF4444',
-    fontSize: 15,
-    fontWeight: '700',
-  },
+  logoutText: { color: '#EF4444', fontSize: 15, fontWeight: '700' },
+  disabled: { opacity: 0.6 },
 });

@@ -17,6 +17,7 @@ import {
 
 import { api } from '../../api/http';
 import { submissionsApi } from '../../api/submissionsApi';
+import { documentsApi } from '../../api/documentsApi';
 import { useAuthStore } from '../../store/authStore';
 
 const colors = {
@@ -101,6 +102,7 @@ function parseDescription(description) {
       reportingPeriod: 'N/A',
       fileName: '',
       fileSize: '',
+      documentId: null,
     };
   }
 
@@ -112,6 +114,7 @@ function parseDescription(description) {
       reportingPeriod: parsed.reportingPeriod || 'N/A',
       fileName: parsed.fileName || '',
       fileSize: parsed.fileSize || '',
+      documentId: parsed.documentId || null,
     };
   } catch {
     return {
@@ -119,6 +122,7 @@ function parseDescription(description) {
       reportingPeriod: 'N/A',
       fileName: '',
       fileSize: '',
+      documentId: null,
     };
   }
 }
@@ -158,6 +162,7 @@ function normalizeAssignment(item = {}) {
     status: state,
     document: details.fileName || item.title || 'Attached thesis document',
     documentSize: details.fileSize || 'Metadata saved',
+    documentId: details.documentId,
     reportingPeriod: details.reportingPeriod || 'N/A',
     assignmentNote: details.comments || item.description || '',
     student: {
@@ -453,6 +458,7 @@ export function ExternalEvaluatorThesisDetail({ route, navigation }) {
   const [comments, setComments] = useState('');
   const [grade, setGrade] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [openingDocument, setOpeningDocument] = useState(false);
 
   const canSubmit = assignment.workflowState === 'EXTERNAL_EVAL_ASSIGNED';
 
@@ -481,6 +487,28 @@ export function ExternalEvaluatorThesisDetail({ route, navigation }) {
       label: 'References and citations',
     },
   ];
+
+  const handleOpenDocument = async () => {
+    if (!assignment?.documentId) {
+      Alert.alert(
+        'No Document',
+        'This assignment does not have a linked uploaded document.'
+      );
+      return;
+    }
+
+    try {
+      setOpeningDocument(true);
+      await documentsApi.openDocument(assignment.documentId, assignment.document);
+    } catch (error) {
+      Alert.alert(
+        'Could not open document',
+        error?.message || 'Please try again.'
+      );
+    } finally {
+      setOpeningDocument(false);
+    }
+  };
 
   const handleSubmit = async () => {
     const numericGrade = Number(grade);
@@ -582,8 +610,21 @@ export function ExternalEvaluatorThesisDetail({ route, navigation }) {
               <Text style={s.docSize}>{assignment.documentSize}</Text>
             </View>
 
-            <TouchableOpacity style={s.openBtn}>
-              <Text style={s.openBtnText}>Open</Text>
+            <TouchableOpacity
+              style={[
+                s.openBtn,
+                (!assignment?.documentId || openingDocument) && { opacity: 0.65 },
+              ]}
+              onPress={handleOpenDocument}
+              disabled={!assignment?.documentId || openingDocument}
+            >
+              {openingDocument ? (
+                <ActivityIndicator color={colors.card} size="small" />
+              ) : (
+                <Text style={s.openBtnText}>
+                  {assignment?.documentId ? 'Open' : 'No File'}
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>

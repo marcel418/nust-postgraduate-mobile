@@ -1,25 +1,28 @@
 // src/navigation/index.js
 
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import {
   ActivityIndicator,
+  Alert,
   Button,
+  FlatList,
+  RefreshControl,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
 
 import LoginScreen from '../screens/auth/LoginScreen';
+import RoleSelectScreen from '../screens/RoleSelectScreen';
+import { api } from '../api/http';
 import { useAuthStore } from '../store/authStore';
 
-// ─── Role Select / Fallback ──────────────────────────────────────────────────
-import RoleSelectScreen from '../screens/RoleSelectScreen';
-
 // ─── Student ──────────────────────────────────────────────────────────────────
-import NotificationsScreen from '../screens/student/NotificationsScreen';
+import StudentNotificationsScreen from '../screens/student/NotificationsScreen';
 import StudentDashboard from '../screens/student/DashboardScreen';
 import FeedbackDetailScreen from '../screens/student/FeedbackDetailScreen';
 import FeedbackListScreen from '../screens/student/FeedbackScreen';
@@ -33,7 +36,6 @@ import UsersScreen from '../screens/admin/UsersScreen';
 import SubmissionsOverviewScreen from '../screens/admin/SubmissionsOverviewScreen';
 import SettingsScreen from '../screens/admin/SettingsScreen';
 import AdminNotificationsScreen from '../screens/admin/NotificationsScreen';
-import AdminProfileScreen from '../screens/supervisor/ProfileScreen';
 
 // ─── Supervisor ───────────────────────────────────────────────────────────────
 import SupervisorDashboardScreen from '../screens/supervisor/DashboardScreen';
@@ -146,6 +148,24 @@ function getPrimaryRole(roleNames) {
   return priority.find((role) => roleNames.includes(role)) || roleNames[0] || null;
 }
 
+function screenIcon(routeName, icons) {
+  return icons[routeName] || 'ellipse-outline';
+}
+
+function formatDate(value) {
+  if (!value) return 'N/A';
+
+  try {
+    return new Date(value).toLocaleDateString('en-NA', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  } catch {
+    return 'N/A';
+  }
+}
+
 function LoadingScreen() {
   return (
     <View style={styles.centerScreen}>
@@ -172,15 +192,118 @@ function NoRoleScreen({ navigation }) {
       </Text>
 
       <View style={styles.actionGroup}>
-        <Button title="Use Manual Role Selector" onPress={() => navigation.navigate('RoleSelect')} />
+        <Button
+          title="Use Manual Role Selector"
+          onPress={() => navigation.navigate('RoleSelect')}
+        />
         <Button title="Sign Out" color="#B42318" onPress={logout} />
       </View>
     </View>
   );
 }
 
-function screenIcon(routeName, icons) {
-  return icons[routeName] || 'ellipse-outline';
+function GenericNotificationsScreen({ navigation }) {
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      const response = await api.get('/notifications');
+      const items = response?.data?.items || response?.items || [];
+
+      setNotifications(
+        [...items].sort(
+          (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)
+        )
+      );
+    } catch (error) {
+      Alert.alert('Could not load notifications', error?.message || 'Please try again.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadNotifications();
+  }, [loadNotifications]);
+
+  const markAsRead = async (item) => {
+    if (item.read_at) return;
+
+    try {
+      await api.post(`/notifications/${item.id}/read`);
+      await loadNotifications();
+    } catch (error) {
+      Alert.alert('Could not update notification', error?.message || 'Please try again.');
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.centerScreen}>
+        <ActivityIndicator size="large" color="#1E56A0" />
+        <Text style={styles.centerText}>Loading notifications...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.notificationsContainer}>
+      <View style={styles.simpleHeader}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+        <Text style={styles.simpleHeaderTitle}>Notifications</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      <FlatList
+        data={notifications}
+        keyExtractor={(item) => String(item.id)}
+        contentContainerStyle={styles.notificationsList}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadNotifications();
+            }}
+          />
+        }
+        renderItem={({ item }) => {
+          const read = !!item.read_at;
+
+          return (
+            <TouchableOpacity
+              style={[styles.notificationCard, !read && styles.notificationUnread]}
+              onPress={() => markAsRead(item)}
+            >
+              <Ionicons
+                name={read ? 'mail-open-outline' : 'mail-unread-outline'}
+                size={22}
+                color={read ? '#6B7280' : '#1E56A0'}
+              />
+
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.notificationText, !read && styles.notificationTextUnread]}>
+                  {item.message || item.title || 'Notification'}
+                </Text>
+                <Text style={styles.notificationDate}>{formatDate(item.created_at)}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        }}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Ionicons name="notifications-off-outline" size={48} color="#9BA4B5" />
+            <Text style={styles.centerText}>No notifications yet.</Text>
+          </View>
+        }
+      />
+    </View>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -234,7 +357,8 @@ function StudentStack() {
       <Stack.Screen name="StudentTabs" component={StudentTabs} />
       <Stack.Screen name="FeedbackList" component={FeedbackListScreen} />
       <Stack.Screen name="FeedbackDetail" component={FeedbackDetailScreen} />
-      <Stack.Screen name="NotificationsList" component={NotificationsScreen} />
+      <Stack.Screen name="NotificationsList" component={StudentNotificationsScreen} />
+      <Stack.Screen name="Profile" component={StudentProfile} />
     </Stack.Navigator>
   );
 }
@@ -279,6 +403,8 @@ function SupervisorStack() {
       <Stack.Screen name="ReviewReport" component={ReviewReportScreen} />
       <Stack.Screen name="SubmitDocuments" component={SubmitDocumentsScreen} />
       <Stack.Screen name="GradeThesis" component={GradeThesisScreen} />
+      <Stack.Screen name="NotificationsList" component={GenericNotificationsScreen} />
+      <Stack.Screen name="Profile" component={SupervisorProfileScreen} />
     </Stack.Navigator>
   );
 }
@@ -321,10 +447,13 @@ function HODStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="HODTabs" component={HODTabs} />
       <Stack.Screen name="HODDashboard" component={HODDashboardScreen} />
+      <Stack.Screen name="HODSubmissions" component={HODSubmissionsScreen} />
+      <Stack.Screen name="HODAssignments" component={HODAssignmentsScreen} />
       <Stack.Screen name="HODReviewSubmission" component={HODReviewSubmissionScreen} />
       <Stack.Screen name="HODAssignInternalEvaluator" component={HODAssignInternalEvaluatorScreen} />
       <Stack.Screen name="HODProposeExternal" component={HODProposeExternalScreen} />
       <Stack.Screen name="HODNotifications" component={HODNotificationsScreen} />
+      <Stack.Screen name="HODProfile" component={HODProfileScreen} />
     </Stack.Navigator>
   );
 }
@@ -345,7 +474,6 @@ function EvaluatorTabs() {
             name={screenIcon(route.name, {
               EvalHome: 'home',
               EvalEvaluations: 'search',
-              EvalProposals: 'document-text',
               EvalProfile: 'person',
             })}
             size={size}
@@ -368,6 +496,7 @@ function EvaluatorStack() {
       <Stack.Screen name="EvalDashboard" component={EvaluatorDashboard} />
       <Stack.Screen name="EvalProposalDetail" component={EvaluatorProposalDetail} />
       <Stack.Screen name="EvalNotifications" component={EvaluatorNotifications} />
+      <Stack.Screen name="EvalProfile" component={EvaluatorProfile} />
     </Stack.Navigator>
   );
 }
@@ -411,6 +540,7 @@ function ExternalEvaluatorStack() {
       <Stack.Screen name="ExtTabs" component={ExternalEvaluatorTabs} />
       <Stack.Screen name="ExtThesisDetail" component={ExternalEvaluatorThesisDetail} />
       <Stack.Screen name="ExtNotifications" component={ExternalEvaluatorNotifications} />
+      <Stack.Screen name="ExtProfile" component={ExternalEvaluatorProfile} />
     </Stack.Navigator>
   );
 }
@@ -498,6 +628,8 @@ function FPGCStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="FPGCTabs" component={FPGCTabs} />
       <Stack.Screen name="FPGCDashboard" component={FPGCDashboard} />
+      <Stack.Screen name="FPGCApplications" component={FPGCApplications} />
+      <Stack.Screen name="FPGCAssignments" component={FPGCAssignments} />
       <Stack.Screen name="FPGCNotifications" component={FPGCNotifications} />
       <Stack.Screen name="FPGCProfile" component={FPGCProfile} />
     </Stack.Navigator>
@@ -542,7 +674,7 @@ function AdminStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="AdminTabs" component={AdminTabs} />
       <Stack.Screen name="NotificationsList" component={AdminNotificationsScreen} />
-      <Stack.Screen name="Profile" component={AdminProfileScreen} />
+      <Stack.Screen name="Profile" component={SettingsScreen} />
     </Stack.Navigator>
   );
 }
@@ -632,5 +764,60 @@ const styles = StyleSheet.create({
     width: '100%',
     gap: 12,
     marginTop: 12,
+  },
+  notificationsContainer: {
+    flex: 1,
+    backgroundColor: '#F0F2F5',
+  },
+  simpleHeader: {
+    backgroundColor: '#0D1B2A',
+    paddingTop: 56,
+    paddingBottom: 18,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  simpleHeaderTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  notificationsList: {
+    padding: 16,
+    gap: 12,
+    paddingBottom: 40,
+  },
+  notificationCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  notificationUnread: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#1E56A0',
+  },
+  notificationText: {
+    color: '#6B7280',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  notificationTextUnread: {
+    color: '#0D1B2A',
+    fontWeight: '700',
+  },
+  notificationDate: {
+    color: '#9BA4B5',
+    fontSize: 12,
+    marginTop: 5,
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 90,
+    gap: 12,
   },
 });

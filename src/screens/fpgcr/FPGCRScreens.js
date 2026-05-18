@@ -1,7 +1,7 @@
 // src/screens/fpgcr/FPGCRScreens.js
 
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,6 +17,7 @@ import {
 
 import { api } from '../../api/http';
 import { submissionsApi } from '../../api/submissionsApi';
+import { documentsApi } from '../../api/documentsApi';
 import { useAuthStore } from '../../store/authStore';
 
 function formatLabel(value) {
@@ -49,6 +50,8 @@ function parseDescription(description) {
       reportingPeriod: 'N/A',
       fileName: '',
       fileSize: '',
+      documentId: null,
+      mimeType: '',
     };
   }
 
@@ -60,6 +63,8 @@ function parseDescription(description) {
       reportingPeriod: parsed.reportingPeriod || 'N/A',
       fileName: parsed.fileName || '',
       fileSize: parsed.fileSize || '',
+      documentId: parsed.documentId || null,
+      mimeType: parsed.mimeType || '',
     };
   } catch {
     return {
@@ -67,6 +72,8 @@ function parseDescription(description) {
       reportingPeriod: 'N/A',
       fileName: '',
       fileSize: '',
+      documentId: null,
+      mimeType: '',
     };
   }
 }
@@ -83,6 +90,8 @@ function normalizeSubmission(item = {}) {
     status: state,
     document: details.fileName || item.title || 'Attached document',
     documentSize: details.fileSize || 'Metadata saved',
+    documentId: details.documentId,
+    mimeType: details.mimeType || '',
     reportingPeriod: details.reportingPeriod || 'N/A',
     studentComments: details.comments || '',
     student: {
@@ -107,6 +116,8 @@ function getStatusColor(status) {
       FORWARDED_TO_FPGC: '#1E56A0',
       APPROVED: '#22C55E',
       REJECTED: '#EF4444',
+      EXTERNAL_EVAL_ASSIGNED: '#7C3AED',
+      EXTERNAL_EVAL_COMPLETED: '#22C55E',
     }[status] || '#6B7280'
   );
 }
@@ -118,6 +129,8 @@ function getStatusLabel(status) {
       FORWARDED_TO_FPGC: 'Forwarded to FPGC',
       APPROVED: 'Approved',
       REJECTED: 'Rejected',
+      EXTERNAL_EVAL_ASSIGNED: 'External Evaluator Assigned',
+      EXTERNAL_EVAL_COMPLETED: 'External Evaluation Complete',
     }[status] || formatLabel(status)
   );
 }
@@ -161,9 +174,14 @@ function useFPGCRSubmissions() {
       const normalized = items
         .map(normalizeSubmission)
         .filter((item) =>
-          ['FORWARDED_TO_FPGCR', 'FORWARDED_TO_FPGC', 'APPROVED', 'REJECTED'].includes(
-            item.status
-          )
+          [
+            'FORWARDED_TO_FPGCR',
+            'FORWARDED_TO_FPGC',
+            'APPROVED',
+            'REJECTED',
+            'EXTERNAL_EVAL_ASSIGNED',
+            'EXTERNAL_EVAL_COMPLETED',
+          ].includes(item.status)
         )
         .sort(
           (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)
@@ -205,7 +223,7 @@ export function FPGCRDashboard({ navigation }) {
   const pending = submissions.filter((item) => item.status === 'FORWARDED_TO_FPGCR');
   const forwarded = submissions.filter((item) => item.status === 'FORWARDED_TO_FPGC');
   const completed = submissions.filter((item) =>
-    ['APPROVED', 'REJECTED'].includes(item.status)
+    ['APPROVED', 'REJECTED', 'EXTERNAL_EVAL_ASSIGNED', 'EXTERNAL_EVAL_COMPLETED'].includes(item.status)
   );
 
   const cards = [
@@ -358,7 +376,7 @@ export function FPGCRReviews({ navigation }) {
       <FPGCRHeader title="Reviews" navigation={navigation} />
 
       <FlatList
-        data={submissions}
+        data={submissions.filter((item) => item.status === 'FORWARDED_TO_FPGCR')}
         keyExtractor={(item) => String(item.id)}
         contentContainerStyle={s.list}
         refreshControl={
@@ -394,8 +412,28 @@ export function FPGCRHdcDecision({ route, navigation }) {
     'Reviewed by FPGC-R and forwarded to FPGC for final review.'
   );
   const [loading, setLoading] = useState(false);
+  const [openingDocument, setOpeningDocument] = useState(false);
 
   const canForward = submission.status === 'FORWARDED_TO_FPGCR';
+
+  const handleOpenDocument = async () => {
+    if (!submission?.documentId) {
+      Alert.alert('No Document', 'This submission does not have a linked uploaded document.');
+      return;
+    }
+
+    try {
+      setOpeningDocument(true);
+      await documentsApi.openDocument(submission.documentId, submission.document || 'document');
+    } catch (error) {
+      Alert.alert(
+        'Could not open document',
+        error?.message || 'Please try again.'
+      );
+    } finally {
+      setOpeningDocument(false);
+    }
+  };
 
   const handleForward = () => {
     if (!comments.trim()) {
@@ -470,8 +508,16 @@ export function FPGCRHdcDecision({ route, navigation }) {
               <Text style={s.docSize}>{submission.documentSize}</Text>
             </View>
 
-            <TouchableOpacity style={s.openBtn}>
-              <Text style={s.openBtnText}>Open</Text>
+            <TouchableOpacity
+              style={[s.openBtn, (!submission?.documentId || openingDocument) && { opacity: 0.65 }]}
+              onPress={handleOpenDocument}
+              disabled={!submission?.documentId || openingDocument}
+            >
+              {openingDocument ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={s.openBtnText}>{submission?.documentId ? 'Open' : 'No File'}</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -532,7 +578,13 @@ export function FPGCRDecisions({ navigation }) {
   const { submissions, loading, refreshing, refresh } = useFPGCRSubmissions();
 
   const completed = submissions.filter((item) =>
-    ['FORWARDED_TO_FPGC', 'APPROVED', 'REJECTED'].includes(item.status)
+    [
+      'FORWARDED_TO_FPGC',
+      'APPROVED',
+      'REJECTED',
+      'EXTERNAL_EVAL_ASSIGNED',
+      'EXTERNAL_EVAL_COMPLETED',
+    ].includes(item.status)
   );
 
   if (loading) {
@@ -554,7 +606,16 @@ export function FPGCRDecisions({ navigation }) {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} />
         }
-        renderItem={({ item }) => <SubmissionCard item={item} onPress={() => {}} />}
+        renderItem={({ item }) => (
+          <SubmissionCard
+            item={item}
+            onPress={() =>
+              navigation.navigate('FPGCRHdcDecision', {
+                submission: item,
+              })
+            }
+          />
+        )}
         ListEmptyComponent={
           <View style={s.emptyCard}>
             <Ionicons name="document-text-outline" size={42} color="#9BA4B5" />

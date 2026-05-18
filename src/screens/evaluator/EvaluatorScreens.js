@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 
 import { api } from '../../api/http';
+import { documentsApi } from '../../api/documentsApi';
 import { submissionsApi } from '../../api/submissionsApi';
 import { useAuthStore } from '../../store/authStore';
 
@@ -51,6 +52,8 @@ function parseDescription(description) {
       reportingPeriod: 'N/A',
       fileName: '',
       fileSize: '',
+      mimeType: '',
+      documentId: null,
     };
   }
 
@@ -62,6 +65,8 @@ function parseDescription(description) {
       reportingPeriod: parsed.reportingPeriod || 'N/A',
       fileName: parsed.fileName || '',
       fileSize: parsed.fileSize || '',
+      mimeType: parsed.mimeType || '',
+      documentId: parsed.documentId || null,
     };
   } catch {
     return {
@@ -69,13 +74,14 @@ function parseDescription(description) {
       reportingPeriod: 'N/A',
       fileName: '',
       fileSize: '',
+      mimeType: '',
+      documentId: null,
     };
   }
 }
 
 function normalizeAssignment(item = {}) {
   const details = parseDescription(item.description);
-
   const state = item.current_state || item.workflow_state || 'UNKNOWN';
 
   return {
@@ -87,6 +93,8 @@ function normalizeAssignment(item = {}) {
     workflowState: state,
     document: details.fileName || item.title || 'Attached document',
     documentSize: details.fileSize || 'Metadata saved',
+    documentId: details.documentId,
+    documentMimeType: details.mimeType,
     reportingPeriod: details.reportingPeriod || 'N/A',
     studentComments: details.comments || '',
     student: {
@@ -114,6 +122,7 @@ function getStatusColor(status) {
       INTERNAL_EVAL_COMPLETED: '#22C55E',
       REVISIONS_REQUIRED: '#F97316',
       UNDER_INTERNAL_EVAL: '#F59E0B',
+      UNKNOWN: '#6B7280',
     }[status] || '#6B7280'
   );
 }
@@ -127,8 +136,13 @@ function getStatusLabel(status) {
       UNDER_INTERNAL_EVAL: 'Pending',
       INTERNAL_EVAL_COMPLETED: 'Completed',
       REVISIONS_REQUIRED: 'Returned',
+      UNKNOWN: 'Unknown',
     }[status] || formatLabel(status)
   );
+}
+
+function isEvaluationOpen(assignment) {
+  return assignment?.workflowState === 'UNDER_INTERNAL_EVAL' || assignment?.status === 'PENDING';
 }
 
 // ─── Shared Header ───────────────────────────────────────────────────────────
@@ -440,6 +454,7 @@ export function EvaluatorEvaluations({ navigation }) {
 
 export function EvaluatorProposalDetail({ route, navigation }) {
   const { assignment } = route.params;
+  const canEvaluate = isEvaluationOpen(assignment);
 
   const [checklist, setChecklist] = useState({
     problemClarity: false,
@@ -451,6 +466,7 @@ export function EvaluatorProposalDetail({ route, navigation }) {
   const [decision, setDecision] = useState(null);
   const [showDecisions, setShowDecisions] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [openingDocument, setOpeningDocument] = useState(false);
 
   const decisions = [
     {
@@ -482,7 +498,37 @@ export function EvaluatorProposalDetail({ route, navigation }) {
     return decisions.find((item) => item.value === decision)?.label || null;
   }, [decision]);
 
+  const handleOpenDocument = async () => {
+    if (!assignment?.documentId) {
+      Alert.alert(
+        'No Document',
+        'This submission does not have a linked uploaded document.'
+      );
+      return;
+    }
+
+    try {
+      setOpeningDocument(true);
+      await documentsApi.openDocument(assignment.documentId, assignment.document);
+    } catch (error) {
+      Alert.alert(
+        'Could not open document',
+        error?.message || 'Please try again.'
+      );
+    } finally {
+      setOpeningDocument(false);
+    }
+  };
+
   const handleSubmit = () => {
+    if (!canEvaluate) {
+      Alert.alert(
+        'Evaluation Closed',
+        'This submission is no longer open for internal evaluation.'
+      );
+      return;
+    }
+
     if (!decision) {
       Alert.alert('Required', 'Please select a decision.');
       return;
@@ -562,6 +608,25 @@ export function EvaluatorProposalDetail({ route, navigation }) {
         showsVerticalScrollIndicator={false}
       >
         <View style={s.card}>
+          <View style={s.cardTop}>
+            <View style={s.typePill}>
+              <Text style={s.typePillText}>{assignment.type}</Text>
+            </View>
+
+            <View
+              style={[
+                s.statusPill,
+                {
+                  backgroundColor: getStatusColor(assignment.status),
+                },
+              ]}
+            >
+              <Text style={s.statusPillText}>
+                {getStatusLabel(assignment.status)}
+              </Text>
+            </View>
+          </View>
+
           <Text style={s.cardTitle}>{assignment.title}</Text>
           <Text style={s.infoText}>
             {assignment.student.name} · {assignment.student.course}
@@ -582,12 +647,27 @@ export function EvaluatorProposalDetail({ route, navigation }) {
             </View>
 
             <View style={s.docInfo}>
-              <Text style={s.docName}>{assignment.document}</Text>
+              <Text style={s.docName} numberOfLines={2}>
+                {assignment.document}
+              </Text>
               <Text style={s.docSize}>{assignment.documentSize}</Text>
             </View>
 
-            <TouchableOpacity style={s.openBtn}>
-              <Text style={s.openBtnText}>Open</Text>
+            <TouchableOpacity
+              style={[
+                s.openBtn,
+                (!assignment?.documentId || openingDocument) && { opacity: 0.65 },
+              ]}
+              onPress={handleOpenDocument}
+              disabled={!assignment?.documentId || openingDocument}
+            >
+              {openingDocument ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={s.openBtnText}>
+                  {assignment?.documentId ? 'Open' : 'No File'}
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -596,6 +676,15 @@ export function EvaluatorProposalDetail({ route, navigation }) {
           <View style={s.card}>
             <Text style={s.sectionTitle}>Student Comments</Text>
             <Text style={s.commentText}>{assignment.studentComments}</Text>
+          </View>
+        )}
+
+        {!canEvaluate && (
+          <View style={s.infoNotice}>
+            <Ionicons name="information-circle-outline" size={18} color="#1E56A0" />
+            <Text style={s.infoNoticeText}>
+              This submission is no longer open for internal evaluation.
+            </Text>
           </View>
         )}
 
@@ -612,6 +701,7 @@ export function EvaluatorProposalDetail({ route, navigation }) {
                   [item.key]: !previous[item.key],
                 }))
               }
+              disabled={!canEvaluate || loading}
             >
               <View
                 style={[
@@ -650,7 +740,7 @@ export function EvaluatorProposalDetail({ route, navigation }) {
             onChangeText={setComments}
             multiline
             numberOfLines={4}
-            editable={!loading}
+            editable={canEvaluate && !loading}
           />
         </View>
 
@@ -658,9 +748,9 @@ export function EvaluatorProposalDetail({ route, navigation }) {
           <Text style={s.sectionTitle}>Decision</Text>
 
           <TouchableOpacity
-            style={s.dropdown}
+            style={[s.dropdown, (!canEvaluate || loading) && { opacity: 0.65 }]}
             onPress={() => setShowDecisions(!showDecisions)}
-            disabled={loading}
+            disabled={!canEvaluate || loading}
           >
             <Text style={[s.dropdownText, !decision && { color: '#9BA4B5' }]}>
               {selectedDecisionLabel || 'Select decision'}
@@ -709,14 +799,19 @@ export function EvaluatorProposalDetail({ route, navigation }) {
           <Text style={s.sectionTitle}>Submit Evaluation</Text>
 
           <TouchableOpacity
-            style={[s.submitBtn, loading && { opacity: 0.6 }]}
+            style={[
+              s.submitBtn,
+              (!canEvaluate || loading) && { opacity: 0.6 },
+            ]}
             onPress={handleSubmit}
-            disabled={loading}
+            disabled={!canEvaluate || loading}
           >
             {loading ? (
               <ActivityIndicator color="#fff" size="small" />
             ) : (
-              <Text style={s.submitBtnText}>Submit Evaluation</Text>
+              <Text style={s.submitBtnText}>
+                {canEvaluate ? 'Submit Evaluation' : 'Evaluation Closed'}
+              </Text>
             )}
           </TouchableOpacity>
         </View>
@@ -1131,8 +1226,28 @@ const s = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 8,
+    minWidth: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   openBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  infoNotice: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 12,
+    padding: 14,
+    borderLeftWidth: 3,
+    borderLeftColor: '#1E56A0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  infoNoticeText: {
+    color: '#1E56A0',
+    fontSize: 13,
+    flex: 1,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
   checkRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1155,7 +1270,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
   },
   checkBoxActive: { backgroundColor: '#22C55E', borderColor: '#22C55E' },
-  checkLabel: { fontSize: 14, color: '#6B7280' },
+  checkLabel: { fontSize: 14, color: '#6B7280', flex: 1 },
   textArea: {
     borderWidth: 1,
     borderColor: '#E5E7EB',
