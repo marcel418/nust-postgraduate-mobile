@@ -5,6 +5,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -63,6 +66,11 @@ export default function UsersScreen({ navigation, route }) {
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState(initialRole);
   const [search, setSearch] = useState('');
+  const [updatingUserId, setUpdatingUserId] = useState(null);
+  const [editingUser, setEditingUser] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [savingUser, setSavingUser] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -95,12 +103,108 @@ export default function UsersScreen({ navigation, route }) {
     });
   }, [filter, search, users]);
 
-  const handleStatusPress = (user) => {
+  const openEditModal = (user) => {
+    setEditingUser(user);
+    setEditName(user?.name || '');
+    setEditEmail(user?.email || '');
+  };
+
+  const handleStatusToggle = (user) => {
+    const currentStatus = String(user.status || 'ACTIVE').toUpperCase();
+    const nextStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+
     Alert.alert(
-      'User Status',
-      `${user.name} is currently marked as ${formatLabel(user.status)}. This MVP backend exposes users as read-only from the mobile app.`,
-      [{ text: 'OK' }]
+      'Update User Status',
+      `Change ${user.name} to ${formatLabel(nextStatus)}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Update',
+          onPress: async () => {
+            try {
+              setUpdatingUserId(user.id);
+              const response = await api.patch(`/users/${user.id}/status`, { status: nextStatus });
+              const updatedUser = extractItems(response)?.[0] || response?.data?.user || response?.user || null;
+
+              if (updatedUser?.id) {
+                setUsers((currentUsers) =>
+                  currentUsers.map((item) =>
+                    item.id === updatedUser.id ? { ...item, status: updatedUser.status } : item
+                  )
+                );
+              } else {
+                setUsers((currentUsers) =>
+                  currentUsers.map((item) =>
+                    item.id === user.id ? { ...item, status: nextStatus } : item
+                  )
+                );
+              }
+            } catch (error) {
+              Alert.alert('Could not update user', error?.response?.data?.errors?.[0]?.message || error?.message || 'Please try again.');
+            } finally {
+              setUpdatingUserId(null);
+            }
+          },
+        },
+      ]
     );
+  };
+
+  const closeEditModal = () => {
+    if (savingUser) return;
+
+    setEditingUser(null);
+    setEditName('');
+    setEditEmail('');
+  };
+
+  const handleSaveUser = async () => {
+    if (!editingUser) return;
+
+    const payload = {};
+    const nextName = editName.trim();
+    const nextEmail = editEmail.trim();
+
+    if (nextName !== String(editingUser.name || '').trim()) {
+      payload.name = nextName;
+    }
+
+    if (nextEmail.toLowerCase() !== String(editingUser.email || '').trim().toLowerCase()) {
+      payload.email = nextEmail;
+    }
+
+    if (Object.keys(payload).length === 0) {
+      Alert.alert('No changes', 'Update at least one field before saving.');
+      return;
+    }
+
+    try {
+      setSavingUser(true);
+      const response = await api.patch(`/users/${editingUser.id}`, payload);
+      const updatedUser = response?.data?.user || response?.user || response?.data || response;
+
+      setUsers((currentUsers) =>
+        currentUsers.map((item) =>
+          item.id === editingUser.id
+            ? {
+                ...item,
+                ...(updatedUser?.name !== undefined ? { name: updatedUser.name } : {}),
+                ...(updatedUser?.email !== undefined ? { email: updatedUser.email } : {}),
+              }
+            : item
+        )
+      );
+
+      Alert.alert('Success', 'User updated successfully.');
+      closeEditModal();
+    } catch (error) {
+      Alert.alert(
+        'Could not update user',
+        error?.response?.data?.errors?.[0]?.message || error?.message || 'Please try again.'
+      );
+    } finally {
+      setSavingUser(false);
+    }
   };
 
   if (loading) {
@@ -198,8 +302,10 @@ export default function UsersScreen({ navigation, route }) {
                       style={[
                         styles.statusBadge,
                         { backgroundColor: active ? '#F0FDF4' : '#FEE2E2' },
+                        updatingUserId === user.id && { opacity: 0.6 },
                       ]}
-                      onPress={() => handleStatusPress(user)}
+                      onPress={() => handleStatusToggle(user)}
+                      disabled={updatingUserId === user.id}
                     >
                       <Text style={[styles.statusText, { color: active ? '#22C55E' : '#EF4444' }]}>
                         {formatLabel(status)}
@@ -208,14 +314,68 @@ export default function UsersScreen({ navigation, route }) {
                   </View>
                 </View>
 
-                <TouchableOpacity style={styles.infoBtn} onPress={() => handleStatusPress(user)}>
-                  <Ionicons name="information-circle-outline" size={22} color="#1E56A0" />
+                <TouchableOpacity style={styles.infoBtn} onPress={() => openEditModal(user)}>
+                  <Ionicons name="create-outline" size={22} color="#1E56A0" />
                 </TouchableOpacity>
               </View>
             );
           })
         )}
       </ScrollView>
+
+      <Modal visible={!!editingUser} transparent animationType="fade" onRequestClose={closeEditModal}>
+        <View style={styles.modalBackdrop}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalKeyboardWrap}
+          >
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalTitle}>Edit User</Text>
+                  <Text style={styles.modalSubtitle}>{editingUser?.name || 'Selected user'}</Text>
+                </View>
+
+                <TouchableOpacity onPress={closeEditModal} disabled={savingUser} style={styles.modalCloseBtn}>
+                  <Ionicons name="close" size={20} color="#0D1B2A" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalContent}>
+                <Text style={styles.fieldLabel}>Name</Text>
+                <TextInput
+                  value={editName}
+                  onChangeText={setEditName}
+                  placeholder="Full name"
+                  placeholderTextColor="#9BA4B5"
+                  style={styles.fieldInput}
+                />
+
+                <Text style={styles.fieldLabel}>Email</Text>
+                <TextInput
+                  value={editEmail}
+                  onChangeText={setEditEmail}
+                  placeholder="Email address"
+                  placeholderTextColor="#9BA4B5"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  style={styles.fieldInput}
+                />
+              </ScrollView>
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={closeEditModal} disabled={savingUser}>
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.saveBtn} onPress={handleSaveUser} disabled={savingUser}>
+                  <Text style={styles.saveBtnText}>{savingUser ? 'Saving...' : 'Save Changes'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -260,4 +420,19 @@ const styles = StyleSheet.create({
   emptyCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 28, alignItems: 'center', gap: 8, marginTop: 24 },
   emptyTitle: { color: '#0D1B2A', fontSize: 17, fontWeight: '800' },
   emptyText: { color: '#6B7280', fontSize: 13, textAlign: 'center' },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.5)', justifyContent: 'center', padding: 16 },
+  modalKeyboardWrap: { width: '100%' },
+  modalCard: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, maxHeight: '90%' },
+  modalHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 16 },
+  modalTitle: { fontSize: 18, fontWeight: '900', color: '#0D1B2A' },
+  modalSubtitle: { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  modalCloseBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' },
+  modalContent: { gap: 10, paddingBottom: 4 },
+  fieldLabel: { fontSize: 12, fontWeight: '800', color: '#374151', textTransform: 'uppercase', letterSpacing: 0.4 },
+  fieldInput: { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, color: '#0D1B2A', fontSize: 14, backgroundColor: '#FFFFFF' },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  cancelBtn: { flex: 1, borderRadius: 14, paddingVertical: 13, alignItems: 'center', backgroundColor: '#F3F4F6' },
+  cancelBtnText: { color: '#0D1B2A', fontWeight: '800', fontSize: 14 },
+  saveBtn: { flex: 1, borderRadius: 14, paddingVertical: 13, alignItems: 'center', backgroundColor: '#1E56A0' },
+  saveBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
 });

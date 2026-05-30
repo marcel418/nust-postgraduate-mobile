@@ -144,12 +144,19 @@ export default function ProgressScreen({ navigation }) {
             Current stage: {latestSubmission ? getStatusLabel(latestSubmission.state) : 'Not Started'}
           </Text>
 
+          <View style={styles.progressMetaRow}>
+            <Text style={styles.progressMetaLabel}>Submission</Text>
+            <Text style={styles.progressMetaValue} numberOfLines={1}>
+              {latestSubmission?.fileName || latestSubmission?.documentLabel || latestSubmission?.title || 'No submission selected'}
+            </Text>
+          </View>
+
           <View style={styles.progressBarBg}>
             <View
               style={[
                 styles.progressBarFill,
                 {
-                  width: `${latestSubmission ? Math.max(getProgressPercentage(latestSubmission.state), 6) : 4}%`,
+                  width: `${latestSubmission ? Math.max(getProgressPercentage(latestSubmission), 6) : 4}%`,
                   backgroundColor: latestSubmission ? getStatusColor(latestSubmission.state) : '#6B7280',
                 },
               ]}
@@ -157,7 +164,7 @@ export default function ProgressScreen({ navigation }) {
           </View>
 
           <Text style={styles.summaryPercent}>
-            {latestSubmission ? getProgressPercentage(latestSubmission.state) : 0}% complete
+            {latestSubmission ? getProgressPercentage(latestSubmission) : 0}% complete
           </Text>
         </View>
 
@@ -198,6 +205,9 @@ const styles = StyleSheet.create({
   summaryCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 12 },
   summaryTitle: { fontSize: 16, fontWeight: '800', color: '#0D1B2A', marginBottom: 4 },
   summaryText: { fontSize: 13, color: '#6B7280', marginBottom: 12 },
+  progressMetaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 },
+  progressMetaLabel: { fontSize: 12, color: '#6B7280', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
+  progressMetaValue: { flex: 1, fontSize: 13, color: '#0D1B2A', fontWeight: '700', textAlign: 'right' },
   progressBarBg: { height: 12, backgroundColor: '#E5E7EB', borderRadius: 6, overflow: 'hidden', marginBottom: 8 },
   progressBarFill: { height: '100%', borderRadius: 6 },
   summaryPercent: { fontSize: 12, color: '#1E56A0', fontWeight: '700' },

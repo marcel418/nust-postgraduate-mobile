@@ -2,12 +2,7 @@
 
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
-
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
-
-if (!API_BASE_URL) {
-  throw new Error('Missing EXPO_PUBLIC_API_BASE_URL in .env');
-}
+import { API_BASE_URL } from './baseUrl';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,

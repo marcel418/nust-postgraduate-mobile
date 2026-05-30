@@ -19,8 +19,22 @@ export const submissionsApi = {
     return api.get(`/submissions/${id}`);
   },
 
+  getHistory: async (id) => {
+    return api.get(`/submissions/${id}/history`);
+  },
+
+  extendDeadline: async (id, extended_due_date) => {
+    return api.patch(`/submissions/${id}/extend-deadline`, {
+      extended_due_date,
+    });
+  },
+
   submit: async (id) => {
     return api.post(`/submissions/${id}/submit`, {});
+  },
+
+  deleteDocument: async (id) => {
+    return api.delete(`/submissions/${id}/document`);
   },
 
   allowedActions: async (id) => {

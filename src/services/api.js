@@ -10,12 +10,13 @@ import {
     ALL_USERS,
     SYSTEM_STATS,
 } from '../data/mockData';
+import { API_BASE_URL } from '../api/baseUrl';
 
 // CONFIG
 // When API team provide the URL,
 // put it here and flip USE_MOCK to false
 const USE_MOCK = true;
-const BASE_URL = 'Real URL';
+const BASE_URL = API_BASE_URL;
 
 // This simulates a real network delay
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

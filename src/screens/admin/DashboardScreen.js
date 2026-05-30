@@ -283,6 +283,14 @@ export default function AdminDashboardScreen({ navigation }) {
             <Ionicons name="settings-outline" size={26} color="#FFFFFF" />
             <Text style={styles.actionText}>Settings</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionBtn}
+            onPress={() => navigation.navigate('SemesterManagement')}
+          >
+            <Ionicons name="calendar-outline" size={26} color="#FFFFFF" />
+            <Text style={styles.actionText}>Semesters</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.sectionHeaderRow}>

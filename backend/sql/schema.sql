@@ -9,6 +9,7 @@ drop table if exists submission_documents cascade;
 drop table if exists documents cascade;
 drop table if exists submission_versions cascade;
 drop table if exists submissions cascade;
+drop table if exists academic_semesters cascade;
 drop table if exists user_roles cascade;
 drop table if exists roles cascade;
 drop table if exists users cascade;
@@ -19,6 +20,9 @@ create table users (
   email text not null unique,
   password_hash text not null,
   status text not null default 'ACTIVE',
+  department varchar(255),
+  supervisor_id uuid references users(id) on delete set null,
+  co_supervisor_id uuid references users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -27,6 +31,14 @@ create table roles (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
   name text not null
+);
+
+create table academic_semesters (
+  id serial primary key,
+  label varchar(50) not null,
+  start_date date not null,
+  end_date date not null,
+  is_active boolean default false
 );
 
 create table user_roles (
@@ -45,6 +57,10 @@ create table submissions (
   submission_type text not null,
   title text not null,
   description text,
+  semester_id integer references academic_semesters(id) on delete set null,
+  due_date date,
+  extended_due_date date,
+  document_label varchar(100),
   current_state text not null default 'DRAFT',
   current_version_no int not null default 1,
   created_by uuid references users(id),
@@ -125,6 +141,15 @@ create table notifications (
   category text not null default 'WORKFLOW',
   read_at timestamptz,
   created_at timestamptz not null default now()
+);
+
+create table notification_schedules (
+  id serial primary key,
+  submission_id uuid not null references submissions(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  trigger_type varchar(30) not null,
+  sent_at timestamptz default now(),
+  unique(submission_id, user_id, trigger_type)
 );
 
 create table audit_logs (

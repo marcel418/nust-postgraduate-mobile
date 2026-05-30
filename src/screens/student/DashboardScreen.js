@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 
 import AppHeader from '../../components/AppHeader';
+import StatusFilterDropdown from '../../components/common/StatusFilterDropdown';
 import { notificationsApi } from '../../api/notificationsApi';
 import { submissionsApi } from '../../api/submissionsApi';
 import { useAuthStore } from '../../store/authStore';
@@ -25,6 +26,11 @@ import {
   normalizeSubmission,
   sortNewestFirst,
 } from './studentHelpers';
+import {
+  ALL_STATUS_VALUE,
+  SUBMISSION_STATUS_FILTER_OPTIONS,
+  filterItemsByStatus,
+} from '../../utils/statusFilters';
 
 function getNextTask(latestSubmission) {
   if (!latestSubmission) {
@@ -101,6 +107,7 @@ export default function DashboardScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [statusFilter, setStatusFilter] = useState(ALL_STATUS_VALUE);
 
   const loadDashboardData = useCallback(async () => {
     try {
@@ -130,8 +137,13 @@ export default function DashboardScreen({ navigation }) {
     loadDashboardData();
   }, [loadDashboardData]);
 
-  const latestSubmission = submissions[0] || null;
-  const progressPercentage = latestSubmission ? getProgressPercentage(latestSubmission.state) : 0;
+  const filteredSubmissions = useMemo(
+    () => filterItemsByStatus(submissions, statusFilter, (item) => item.state),
+    [statusFilter, submissions]
+  );
+
+  const latestSubmission = filteredSubmissions[0] || null;
+  const progressPercentage = latestSubmission ? getProgressPercentage(latestSubmission) : 0;
   const proposalStage = latestSubmission ? getStatusLabel(latestSubmission.state) : 'Not Started';
   const unreadCount = notifications.filter((item) => !item.read_at && !item.read).length;
   const nextTask = getNextTask(latestSubmission);
@@ -151,7 +163,7 @@ export default function DashboardScreen({ navigation }) {
 
     if (notificationFeedback.length > 0) return notificationFeedback;
 
-    return submissions.slice(0, 2).map((item) => ({
+    return filteredSubmissions.slice(0, 2).map((item) => ({
       id: `submission-${item.id}`,
       fromInitials: 'WF',
       fromName: 'Workflow Update',
@@ -162,7 +174,7 @@ export default function DashboardScreen({ navigation }) {
       createdAt: item.updatedAt,
       raw: item,
     }));
-  }, [notifications, submissions]);
+  }, [filteredSubmissions, notifications]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -187,6 +199,13 @@ export default function DashboardScreen({ navigation }) {
       <AppHeader title="Home" navigation={navigation} />
 
       <View style={styles.body}>
+        <StatusFilterDropdown
+          label="Submission Status"
+          value={statusFilter}
+          options={SUBMISSION_STATUS_FILTER_OPTIONS}
+          onChange={setStatusFilter}
+        />
+
         <View style={styles.card}>
           <View style={styles.greetingRow}>
             <View style={{ flex: 1 }}>
@@ -214,6 +233,13 @@ export default function DashboardScreen({ navigation }) {
           <View style={styles.progressLabelRow}>
             <Text style={styles.progressLabel}>Current Progress</Text>
             <Text style={styles.progressValue}>{progressPercentage}%</Text>
+          </View>
+
+          <View style={styles.progressMetaRow}>
+            <Text style={styles.progressMetaLabel}>Submission</Text>
+            <Text style={styles.progressMetaValue} numberOfLines={1}>
+              {latestSubmission?.fileName || latestSubmission?.documentLabel || latestSubmission?.title || 'No submission selected'}
+            </Text>
           </View>
 
           <View style={styles.progressBarBg}>
@@ -340,6 +366,9 @@ const styles = StyleSheet.create({
   progressLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   progressLabel: { fontSize: 14, color: '#6B7280' },
   progressValue: { color: '#1E56A0', fontWeight: '800' },
+  progressMetaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 },
+  progressMetaLabel: { fontSize: 12, color: '#6B7280', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
+  progressMetaValue: { flex: 1, fontSize: 13, color: '#0D1B2A', fontWeight: '700', textAlign: 'right' },
   progressBarBg: { height: 28, backgroundColor: '#E5E7EB', borderRadius: 14, overflow: 'hidden', marginBottom: 12 },
   progressBarFill: { height: '100%', backgroundColor: '#1E56A0', borderRadius: 14 },
   stageRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },

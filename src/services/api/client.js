@@ -1,11 +1,9 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
-
-// Base URL switches based on environment variable
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+import { API_BASE_URL } from '../../api/baseUrl';
 
 const client = axios.create({
-  baseURL: `${BASE_URL}/api/v1`,
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
     Accept: 'application/json',

@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 
 import AppHeader from '../../components/AppHeader';
+import DeadlineExtensionControl from '../../components/common/DeadlineExtensionControl';
 import { submissionsApi } from '../../api/submissionsApi';
 import { documentsApi } from '../../api/documentsApi';
 import {
@@ -34,13 +35,31 @@ export default function ReviewReportScreen({ route, navigation }) {
     routeSubmission ? normalizeSubmission(routeSubmission.raw || routeSubmission) : null
   );
   const [comments, setComments] = useState('Approved by supervisor.');
-  const [signed, setSigned] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [opening, setOpening] = useState(false);
   const [loading, setLoading] = useState(!routeSubmission);
   const [refreshing, setRefreshing] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const loadSubmission = useCallback(async () => {
+    if (routeSubmission?.id) {
+      try {
+        const response = await submissionsApi.getById(routeSubmission.id);
+        const payload = response?.data?.submission || response?.submission || routeSubmission;
+
+        setSubmission(normalizeSubmission(payload));
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      } catch (error) {
+        setSubmission(normalizeSubmission(routeSubmission.raw || routeSubmission));
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+    }
+
     if (routeSubmission) {
       setSubmission(normalizeSubmission(routeSubmission.raw || routeSubmission));
       setLoading(false);
@@ -97,6 +116,38 @@ export default function ReviewReportScreen({ route, navigation }) {
     };
   }, [routeStudent, submission]);
 
+  const effectiveDeadline = submission?.extendedDueDate || submission?.dueDate || null;
+
+  const loadHistory = useCallback(async (submissionId) => {
+    if (!submissionId) {
+      setHistory([]);
+      setHistoryLoading(false);
+      return;
+    }
+
+    try {
+      setHistoryLoading(true);
+
+      const response = await submissionsApi.getHistory(submissionId);
+      const timeline = response?.data?.timeline || response?.timeline || [];
+
+      setHistory(Array.isArray(timeline) ? timeline : []);
+    } catch (error) {
+      setHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (submission?.id) {
+      loadHistory(submission.id);
+      return;
+    }
+
+    setHistory([]);
+  }, [loadHistory, submission?.id]);
+
   const handleOpenDocument = async () => {
     if (!submission?.documentId) {
       Alert.alert('No Document', 'This submission does not have a linked uploaded document.');
@@ -118,11 +169,6 @@ export default function ReviewReportScreen({ route, navigation }) {
 
   const handleApprove = () => {
     if (!submission?.id) return;
-
-    if (!signed) {
-      Alert.alert('Sign Required', 'Please sign the report before approving.');
-      return;
-    }
 
     if (!canReview) {
       Alert.alert(
@@ -361,10 +407,66 @@ export default function ReviewReportScreen({ route, navigation }) {
             <Text style={styles.detailText}>Version: {submission.version}</Text>
           </View>
 
+          {effectiveDeadline && (
+            <View style={styles.detailRow}>
+              <Ionicons name="time-outline" size={16} color="#6B7280" />
+              <Text style={styles.detailText}>
+                Current deadline: {formatDate(effectiveDeadline)}
+              </Text>
+            </View>
+          )}
+
           {!!submission.comments && (
             <View style={styles.commentsBox}>
               <Text style={styles.commentsLabel}>Student comments</Text>
               <Text style={styles.commentsText}>{submission.comments}</Text>
+            </View>
+          )}
+        </View>
+
+        {effectiveDeadline && (
+          <View style={styles.card}>
+            <Text style={styles.fieldLabel}>Deadline Extension</Text>
+
+            <DeadlineExtensionControl
+              submissionId={submission.id}
+              currentDeadlineText={formatDate(effectiveDeadline)}
+              onSuccess={loadSubmission}
+            />
+          </View>
+        )}
+
+        <View style={styles.card}>
+          <Text style={styles.fieldLabel}>Workflow History</Text>
+
+          {historyLoading ? (
+            <View style={styles.historyLoadingState}>
+              <ActivityIndicator size="small" color="#1E56A0" />
+              <Text style={styles.historyLoadingText}>Loading workflow history...</Text>
+            </View>
+          ) : history.length > 0 ? (
+            <View style={styles.historyList}>
+              {history.map((item) => (
+                <View key={`${item.type}-${item.created_at}-${item.label}`} style={styles.historyItem}>
+                  <View style={styles.historyDot} />
+
+                  <View style={styles.historyBody}>
+                    <Text style={styles.historyLabel}>{item.label}</Text>
+                    <Text style={styles.historyMeta}>
+                      {item.actor} · {formatDate(item.created_at)}
+                    </Text>
+
+                    {item.metadata?.reason ? (
+                      <Text style={styles.historyDetail}>{item.metadata.reason}</Text>
+                    ) : null}
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.historyEmptyState}>
+              <Ionicons name="time-outline" size={18} color="#9BA4B5" />
+              <Text style={styles.historyEmptyText}>No workflow history available yet.</Text>
             </View>
           )}
         </View>
@@ -383,22 +485,6 @@ export default function ReviewReportScreen({ route, navigation }) {
             textAlignVertical="top"
             editable={!submitting && canReview}
           />
-        </View>
-
-        <View style={styles.card}>
-          <TouchableOpacity
-            style={styles.signRow}
-            onPress={() => setSigned(!signed)}
-            disabled={!canReview || submitting}
-          >
-            <View style={[styles.checkbox, signed && styles.checkboxChecked]}>
-              {signed && (
-                <Ionicons name="checkmark" size={14} color="#FFFFFF" />
-              )}
-            </View>
-
-            <Text style={styles.signLabel}>Sign report</Text>
-          </TouchableOpacity>
         </View>
 
         {canReview ? (
@@ -584,29 +670,6 @@ const styles = StyleSheet.create({
     color: '#0D1B2A',
     minHeight: 120,
   },
-  signRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
-    borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxChecked: {
-    backgroundColor: '#1E56A0',
-    borderColor: '#1E56A0',
-  },
-  signLabel: {
-    fontSize: 15,
-    color: '#0D1B2A',
-    fontWeight: '600',
-  },
   actionRow: {
     flexDirection: 'row',
     gap: 12,
@@ -649,6 +712,60 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     fontWeight: '600',
+  },
+  historyLoadingState: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+  },
+  historyLoadingText: {
+    color: '#6B7280',
+    fontSize: 13,
+  },
+  historyList: {
+    gap: 12,
+  },
+  historyItem: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
+  },
+  historyDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#1E56A0',
+    marginTop: 5,
+  },
+  historyBody: {
+    flex: 1,
+  },
+  historyLabel: {
+    color: '#0D1B2A',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  historyMeta: {
+    color: '#6B7280',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  historyDetail: {
+    color: '#374151',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  historyEmptyState: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+  },
+  historyEmptyText: {
+    color: '#6B7280',
+    fontSize: 13,
   },
   emptyState: {
     margin: 16,
