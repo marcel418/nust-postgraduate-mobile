@@ -1,6 +1,8 @@
 // backend/src/routes/submissions.routes.js
 
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const pool = require('../db');
 const { auth } = require('../middleware/auth');
 const { success, error, correlationId } = require('../utils/response');
@@ -34,6 +36,91 @@ function getAllowedActions(submission, user) {
   return [];
 }
 
+function canExtendDeadline(user) {
+  const roles = Array.isArray(user?.roles) ? user.roles : [];
+
+  return roles.includes('SUPERVISOR') || roles.includes('FPGC');
+}
+
+function parseIsoDateOnly(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+
+  const parsed = new Date(`${value}T00:00:00Z`);
+
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function humanizeToken(value) {
+  if (!value) return 'N/A';
+
+  return String(value)
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getWorkflowHistoryLabel(event = {}) {
+  const actionCode = String(event.action_code || '').toUpperCase();
+  const toState = String(event.to_state || '').toUpperCase();
+
+  return (
+    {
+      SUBMIT: 'Submission Submitted',
+      SUPERVISOR_APPROVE: 'Supervisor Reviewed',
+      SUPERVISOR_RETURN: 'Returned for Revision',
+      HOD_ASSIGN_INTERNAL_EVALUATOR: 'Internal Evaluator Assigned',
+      HOD_FORWARD_FPGCR: 'Forwarded to FPGC-R',
+      FPGCR_FORWARD_FPGC: 'Forwarded to FPGC',
+      FPGC_FINAL_APPROVE: 'Approved',
+      FPGC_FINAL_REJECT: 'Rejected',
+      INTERNAL_EVAL_COMPLETE: 'Internal Evaluation Complete',
+      INTERNAL_EVAL_RETURN: 'Returned for Revision',
+      EXTERNAL_EVAL_COMPLETE: 'External Evaluation Complete',
+      EXTERNAL_EVAL_RETURN: 'Returned for Revision',
+    }[actionCode] ||
+    {
+      DRAFT: 'Submission Created',
+      SUBMITTED: 'Submission Submitted',
+      APPROVED_BY_SUPERVISOR: 'Supervisor Reviewed',
+      REVISIONS_REQUIRED: 'Returned for Revision',
+      UNDER_INTERNAL_EVAL: 'Internal Evaluator Assigned',
+      INTERNAL_EVAL_COMPLETED: 'Internal Evaluation Complete',
+      FORWARDED_TO_FPGCR: 'Forwarded to FPGC-R',
+      FORWARDED_TO_FPGC: 'Forwarded to FPGC',
+      EXTERNAL_EVAL_ASSIGNED: 'External Evaluator Assigned',
+      EXTERNAL_EVAL_COMPLETED: 'External Evaluation Complete',
+      APPROVED: 'Approved',
+      REJECTED: 'Rejected',
+    }[toState] ||
+    humanizeToken(actionCode)
+  );
+}
+
+function getAuditHistoryLabel(event = '') {
+  const normalized = String(event).toUpperCase();
+
+  return (
+    {
+      SUBMISSION_CREATED: 'Submission Created',
+      SUBMISSION_SUBMITTED: 'Submission Submitted',
+      SUBMISSION_APPROVED_BY_SUPERVISOR: 'Supervisor Reviewed',
+      SUBMISSION_RETURNED_BY_SUPERVISOR: 'Returned for Revision',
+      SUBMISSION_DEADLINE_EXTENDED: 'Deadline Extended',
+      HOD_ASSIGNED_INTERNAL_EVALUATOR: 'Internal Evaluator Assigned',
+      HOD_FORWARDED_TO_FPGCR: 'Forwarded to FPGC-R',
+      FPGCR_FORWARDED_TO_FPGC: 'Forwarded to FPGC',
+      FPGC_FINAL_APPROVAL: 'Approved',
+      FPGC_FINAL_REJECTION: 'Rejected',
+      FPGC_FINAL_APPROVE: 'Approved',
+      FPGC_FINAL_REJECT: 'Rejected',
+      SUBMISSION_APPROVED_BY_FPGC: 'Approved',
+      SUBMISSION_REJECTED_BY_FPGC: 'Rejected',
+    }[normalized] || humanizeToken(normalized)
+  );
+}
+
 // GET /api/v1/submissions
 router.get('/', async (req, res) => {
   try {
@@ -43,9 +130,11 @@ router.get('/', async (req, res) => {
     let query = `
       select distinct
         s.*,
+        sem.label as semester_label,
         wi.current_state as workflow_state
       from submissions s
       left join workflow_instances wi on wi.submission_id = s.id
+      left join academic_semesters sem on sem.id = s.semester_id
     `;
 
     let where = '';
@@ -101,7 +190,7 @@ router.post('/', async (req, res) => {
   const client = await pool.connect();
 
   try {
-    const { submission_type, title, description } = req.body;
+    const { submission_type, title, description, document_label } = req.body;
 
     if (!submission_type || !title) {
       return error(req, res, 'submission_type and title are required.', 422);
@@ -109,15 +198,53 @@ router.post('/', async (req, res) => {
 
     await client.query('begin');
 
+    const semesterResult = await client.query(
+      `
+      select id, label, end_date
+      from academic_semesters
+      where is_active = true
+      order by start_date desc, id desc
+      limit 1
+      `
+    );
+
+    const activeSemester = semesterResult.rows[0] || null;
+
+    if (activeSemester) {
+      const existingResult = await client.query(
+        `
+        select id
+        from submissions
+        where student_id = $1
+          and semester_id = $2
+        limit 1
+        `,
+        [req.user.id, activeSemester.id]
+      );
+
+      if (existingResult.rowCount > 0) {
+        await client.query('rollback');
+        return error(req, res, 'You already submitted a report for this semester', 409);
+      }
+    }
+
     const submissionResult = await client.query(
       `
       insert into submissions 
-        (student_id, submission_type, title, description, current_state, created_by, updated_by)
+        (student_id, submission_type, title, description, document_label, semester_id, due_date, current_state, created_by, updated_by)
       values 
-        ($1, $2, $3, $4, 'DRAFT', $1, $1)
+        ($1, $2, $3, $4, $5, $6, $7, 'DRAFT', $1, $1)
       returning *
       `,
-      [req.user.id, submission_type, title, description || null]
+      [
+        req.user.id,
+        submission_type,
+        title,
+        description || null,
+        document_label || title || null,
+        activeSemester ? activeSemester.id : null,
+        activeSemester ? activeSemester.end_date : null,
+      ]
     );
 
     const submission = submissionResult.rows[0];
@@ -177,9 +304,11 @@ router.get('/:id', async (req, res) => {
       `
       select 
         s.*,
+        sem.label as semester_label,
         wi.current_state as workflow_state
       from submissions s
       left join workflow_instances wi on wi.submission_id = s.id
+      left join academic_semesters sem on sem.id = s.semester_id
       where s.id = $1
       `,
       [req.params.id]
@@ -197,6 +326,453 @@ router.get('/:id', async (req, res) => {
     });
   } catch (err) {
     return error(req, res, 'Could not fetch submission.', 500, err.message);
+  }
+});
+
+// GET /api/v1/submissions/:id/history
+router.get('/:id/history', async (req, res) => {
+  try {
+    const submissionResult = await pool.query(
+      `
+      select
+        s.*,
+        sem.label as semester_label,
+        wi.current_state as workflow_state
+      from submissions s
+      left join workflow_instances wi on wi.submission_id = s.id
+      left join academic_semesters sem on sem.id = s.semester_id
+      where s.id = $1
+      `,
+      [req.params.id]
+    );
+
+    if (submissionResult.rowCount === 0) {
+      return error(req, res, 'Submission not found.', 404);
+    }
+
+    const submission = submissionResult.rows[0];
+
+    if (
+      Array.isArray(req.user.roles) &&
+      req.user.roles.includes('STUDENT') &&
+      submission.student_id !== req.user.id
+    ) {
+      return error(req, res, 'Forbidden.', 403);
+    }
+
+    const historyResult = await pool.query(
+      `
+      select
+        t.kind,
+        t.created_at,
+        t.actor_name,
+        t.actor_email,
+        t.action_code,
+        t.from_state,
+        t.to_state,
+        t.reason,
+        t.event_name,
+        t.old_values,
+        t.new_values,
+        t.correlation_id,
+        t.source_order
+      from (
+        select
+          'workflow_transition'::text as kind,
+          wt.created_at,
+          u.name as actor_name,
+          u.email as actor_email,
+          wt.action_code,
+          wt.from_state,
+          wt.to_state,
+          wt.reason,
+          null::text as event_name,
+          null::jsonb as old_values,
+          null::jsonb as new_values,
+          wt.correlation_id,
+          0 as source_order
+        from workflow_transitions wt
+        left join users u on u.id = wt.actor_id
+        where wt.submission_id = $1
+
+        union all
+
+        select
+          'audit_log'::text as kind,
+          al.created_at,
+          u.name as actor_name,
+          u.email as actor_email,
+          null::text as action_code,
+          null::text as from_state,
+          null::text as to_state,
+          null::text as reason,
+          al.event as event_name,
+          al.old_values,
+          al.new_values,
+          al.correlation_id,
+          1 as source_order
+        from audit_logs al
+        left join users u on u.id = al.actor_id
+        where al.entity_type = 'submission'
+          and al.entity_id = $1
+      ) t
+      order by t.created_at asc, t.source_order asc
+      `,
+      [req.params.id]
+    );
+
+    const timeline = historyResult.rows.map((row) => {
+      const label =
+        row.kind === 'workflow_transition'
+          ? getWorkflowHistoryLabel(row)
+          : getAuditHistoryLabel(row.event_name);
+
+      return {
+        type: row.kind,
+        label,
+        actor: row.actor_name || row.actor_email || 'System',
+        created_at: row.created_at,
+        metadata: {
+          action_code: row.action_code,
+          from_state: row.from_state,
+          to_state: row.to_state,
+          reason: row.reason,
+          event: row.event_name,
+          old_values: row.old_values,
+          new_values: row.new_values,
+          correlation_id: row.correlation_id,
+        },
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        timeline,
+      },
+      meta: {
+        correlation_id: correlationId(req),
+      },
+      errors: [],
+    });
+  } catch (err) {
+    return error(req, res, 'Could not fetch submission history.', 500, err.message);
+  }
+});
+
+// PATCH /api/v1/submissions/:id/extend-deadline
+router.patch('/:id/extend-deadline', async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    if (!canExtendDeadline(req.user)) {
+      return error(req, res, 'Forbidden.', 403);
+    }
+
+    const requestedDeadline = parseIsoDateOnly(req.body?.extended_due_date);
+
+    if (!requestedDeadline) {
+      return error(
+        req,
+        res,
+        'extended_due_date must be a valid YYYY-MM-DD date.',
+        400
+      );
+    }
+
+    await client.query('begin');
+
+    const submissionResult = await client.query(
+      `
+      select *
+      from submissions
+      where id = $1
+      for update
+      `,
+      [req.params.id]
+    );
+
+    if (submissionResult.rowCount === 0) {
+      await client.query('rollback');
+      return error(req, res, 'Submission not found.', 404);
+    }
+
+    const submission = submissionResult.rows[0];
+    const effectiveDeadlineValue = submission.extended_due_date || submission.due_date;
+    const effectiveDeadline = effectiveDeadlineValue
+      ? new Date(effectiveDeadlineValue)
+      : null;
+
+    if (!effectiveDeadlineValue || !effectiveDeadline || Number.isNaN(effectiveDeadline.getTime())) {
+      await client.query('rollback');
+      return error(
+        req,
+        res,
+        'Submission does not have a deadline that can be extended.',
+        400
+      );
+    }
+
+    if (requestedDeadline.getTime() <= effectiveDeadline.getTime()) {
+      await client.query('rollback');
+      return error(
+        req,
+        res,
+        'extended_due_date must be later than the current deadline.',
+        400
+      );
+    }
+
+    const updatedResult = await client.query(
+      `
+      update submissions
+      set extended_due_date = $1
+      where id = $2
+      returning *
+      `,
+      [req.body.extended_due_date, submission.id]
+    );
+
+    await client.query(
+      `
+      insert into notifications
+        (user_id, title, message, category)
+      values
+        ($1, 'Deadline Extended', $2, 'DEADLINE')
+      `,
+      [
+        submission.student_id,
+        `Your submission deadline has been extended to ${req.body.extended_due_date}.`,
+      ]
+    );
+
+    await client.query(
+      `
+      insert into audit_logs
+        (actor_id, event, entity_type, entity_id, old_values, new_values, correlation_id)
+      values
+        ($1, 'SUBMISSION_DEADLINE_EXTENDED', 'submission', $2, $3, $4, $5)
+      `,
+      [
+        req.user.id,
+        submission.id,
+        submission,
+        updatedResult.rows[0],
+        correlationId(req),
+      ]
+    );
+
+    await client.query('commit');
+
+    return success(req, res, {
+      submission: updatedResult.rows[0],
+    });
+  } catch (err) {
+    await client.query('rollback');
+    return error(req, res, 'Could not extend submission deadline.', 500, err.message);
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/v1/submissions/:id/document
+router.delete('/:id/document', async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query('begin');
+
+    const submissionResult = await client.query(
+      `
+      select *
+      from submissions
+      where id = $1
+      for update
+      `,
+      [req.params.id]
+    );
+
+    if (submissionResult.rowCount === 0) {
+      await client.query('rollback');
+      return error(req, res, 'Submission not found.', 404);
+    }
+
+    const submission = submissionResult.rows[0];
+
+    const roles = Array.isArray(req.user.roles) ? req.user.roles : [];
+
+    // Only allow the owning student to delete their uploaded file.
+    // Explicitly deny non-students to prevent supervisors/admins from unlinking student files.
+    if (!roles.includes('STUDENT')) {
+      await client.query('rollback');
+      return error(req, res, 'Only the owning student may delete uploaded files.', 403);
+    }
+
+    if (submission.student_id !== req.user.id) {
+      await client.query('rollback');
+      return error(req, res, 'Forbidden.', 403);
+    }
+
+    // Compute effective deadline
+    const effectiveDeadlineValue = submission.extended_due_date || submission.due_date;
+    const effectiveDeadline = effectiveDeadlineValue ? new Date(effectiveDeadlineValue) : null;
+
+    // If there is an effective deadline and it's passed, block deletion.
+    if (effectiveDeadline) {
+      const now = new Date();
+      if (now.getTime() > effectiveDeadline.getTime()) {
+        await client.query('rollback');
+        return error(req, res, 'Cannot delete uploaded file after the submission deadline.', 403);
+      }
+    }
+
+    // Parse description JSON to find linked document id
+    let desc = null;
+    try {
+      desc = submission.description ? JSON.parse(submission.description) : {};
+    } catch {
+      desc = {};
+    }
+
+    const documentId = desc.documentId || desc.document_id || null;
+
+    if (!documentId) {
+      // Nothing to unlink; still safe to return success
+      await client.query('rollback');
+      return error(req, res, 'No uploaded document found for this submission.', 404);
+    }
+
+    // Load document row if exists
+    const docResult = await client.query(
+      `select * from documents where id = $1`,
+      [documentId]
+    );
+
+    const document = docResult.rowCount > 0 ? docResult.rows[0] : null;
+
+    const oldDescription = desc;
+
+    // Remove file-related keys from description
+    delete desc.documentId;
+    delete desc.document_id;
+    delete desc.fileName;
+    delete desc.file_size;
+    delete desc.fileSize;
+    delete desc.mimeType;
+    delete desc.mime_type;
+
+    const newDescriptionText = Object.keys(desc).length ? JSON.stringify(desc) : null;
+
+    const updatedResult = await client.query(
+      `
+      update submissions
+      set description = $1,
+          document_label = coalesce($2, document_label),
+          updated_by = $3,
+          updated_at = now()
+      where id = $4
+      returning *
+      `,
+      [newDescriptionText, submission.title || null, req.user.id, submission.id]
+    );
+
+    // If the document row exists and was uploaded by this user, check references and remove it safely
+    if (document && String(document.uploaded_by) === String(req.user.id)) {
+      const refCountRes = await client.query(
+        `select count(*) as cnt from submission_documents where document_id = $1`,
+        [document.id]
+      );
+
+      const submissionDocRefs = Number(refCountRes.rows[0].cnt || 0);
+
+      // Check other submissions' description fields for references to this document id (text-search fallback)
+      const otherDescRes = await client.query(
+        `select count(*) as cnt from submissions where id <> $1 and description is not null and description like '%' || $2 || '%'`,
+        [submission.id, String(document.id)]
+      );
+
+      const otherDescRefs = Number(otherDescRes.rows[0].cnt || 0);
+
+      if (submissionDocRefs > 0 || otherDescRefs > 0) {
+        // Preserve document row and file; we only unlink the submission description (already done above)
+        await client.query(
+          `
+          insert into audit_logs
+            (actor_id, event, entity_type, entity_id, old_values, new_values, correlation_id)
+          values
+            ($1, 'SUBMISSION_DOCUMENT_UNLINKED_PRESERVE_DOCUMENT', 'submission', $2, $3, $4, $5)
+          `,
+          [req.user.id, submission.id, oldDescription, updatedResult.rows[0], correlationId(req)]
+        );
+      } else {
+        // No references found: attempt safe file removal using rename-to-tombstone approach to avoid partial state
+        const uploadsDir = path.resolve(__dirname, '../../uploads');
+        const absolutePath = path.resolve(__dirname, '../..', document.storage_key || '');
+
+        let tombstonePath = null;
+
+        try {
+          if (!absolutePath.startsWith(uploadsDir)) {
+            throw new Error('Document path not inside uploads directory');
+          }
+
+          if (fs.existsSync(absolutePath)) {
+            const tombstoneDir = path.join(uploadsDir, '.trash');
+            if (!fs.existsSync(tombstoneDir)) fs.mkdirSync(tombstoneDir, { recursive: true });
+            tombstonePath = path.join(tombstoneDir, `${Date.now()}-${path.basename(absolutePath)}`);
+            fs.renameSync(absolutePath, tombstonePath);
+          }
+
+          // delete DB row now that file moved to tombstone
+          await client.query(`delete from documents where id = $1`, [document.id]);
+
+          // finally remove tombstone file if present (best-effort)
+          try {
+            if (tombstonePath && fs.existsSync(tombstonePath)) {
+              fs.unlinkSync(tombstonePath);
+            }
+          } catch (err) {
+            // non-fatal: log and continue
+            console.error('Could not remove tombstone file', err && err.message);
+          }
+        } catch (err) {
+          // If any file system step failed, rollback and preserve DB
+          console.error('File removal failed, rolling back:', err && err.message);
+          await client.query('rollback');
+          // try to restore tombstone if we moved it
+          try {
+            if (tombstonePath && fs.existsSync(tombstonePath)) {
+              fs.renameSync(tombstonePath, absolutePath);
+            }
+          } catch (restoreErr) {
+            console.error('Could not restore tombstone file after failure', restoreErr && restoreErr.message);
+          }
+
+          return error(req, res, 'Could not remove file from storage. Operation aborted.', 500, err.message);
+        }
+      }
+    }
+
+    await client.query(
+      `
+      insert into audit_logs
+        (actor_id, event, entity_type, entity_id, old_values, new_values, correlation_id)
+      values
+        ($1, 'SUBMISSION_DOCUMENT_REMOVED', 'submission', $2, $3, $4, $5)
+      `,
+      [req.user.id, submission.id, oldDescription, updatedResult.rows[0], correlationId(req)]
+    );
+
+    await client.query('commit');
+
+    return success(req, res, {
+      submission: updatedResult.rows[0],
+    });
+  } catch (err) {
+    await client.query('rollback');
+    return error(req, res, 'Could not remove submission document.', 500, err.message);
+  } finally {
+    client.release();
   }
 });
 

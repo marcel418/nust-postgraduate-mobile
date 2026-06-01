@@ -20,7 +20,14 @@ import { api } from '../../api/http';
 import { submissionsApi } from '../../api/submissionsApi';
 import { usersApi } from '../../api/usersApi';
 import { documentsApi } from '../../api/documentsApi';
+import DeadlineExtensionControl from '../../components/common/DeadlineExtensionControl';
 import { useAuthStore } from '../../store/authStore';
+import StatusFilterDropdown from '../../components/common/StatusFilterDropdown';
+import {
+  ALL_STATUS_VALUE,
+  SUBMISSION_STATUS_FILTER_OPTIONS,
+  filterItemsByStatus,
+} from '../../utils/statusFilters';
 
 function formatLabel(value) {
   if (!value) return 'N/A';
@@ -371,7 +378,7 @@ function FinalDecisionModal({
   );
 }
 
-function SubmissionCard({ item, onApprove, onReject }) {
+function SubmissionCard({ item, onApprove, onReject, onRefresh }) {
   const [openingDocument, setOpeningDocument] = useState(false);
 
   const canDecide =
@@ -380,6 +387,7 @@ function SubmissionCard({ item, onApprove, onReject }) {
     typeof onReject === 'function';
 
   const canOpenDocument = !!item.documentId;
+  const effectiveDeadline = item.extendedDueDate || item.dueDate || null;
 
   const handleOpenDocument = async () => {
     if (!item.documentId) {
@@ -471,6 +479,21 @@ function SubmissionCard({ item, onApprove, onReject }) {
         <Ionicons name="calendar-outline" size={14} color="#6B7280" />
         <Text style={s.infoText}>Updated {formatDate(item.updatedAt)}</Text>
       </View>
+
+      {effectiveDeadline && (
+        <View style={s.metaRow}>
+          <Ionicons name="time-outline" size={14} color="#6B7280" />
+          <Text style={s.infoText}>Deadline {formatDate(effectiveDeadline)}</Text>
+        </View>
+      )}
+
+      {effectiveDeadline && (
+        <DeadlineExtensionControl
+          submissionId={item.id}
+          currentDeadlineText={formatDate(effectiveDeadline)}
+          onSuccess={onRefresh}
+        />
+      )}
 
       {canDecide && (
         <View style={s.actionRow}>
@@ -768,12 +791,18 @@ function ExternalAssignmentCard({
 
 export function FPGCDashboard({ navigation }) {
   const { submissions, loading, refreshing, refresh } = useFPGCSubmissions();
+  const [statusFilter, setStatusFilter] = useState(ALL_STATUS_VALUE);
 
-  const pending = submissions.filter((item) => item.status === 'FORWARDED_TO_FPGC');
-  const approved = submissions.filter((item) => item.status === 'APPROVED');
-  const rejected = submissions.filter((item) => item.status === 'REJECTED');
-  const externalAssigned = submissions.filter((item) => item.status === 'EXTERNAL_EVAL_ASSIGNED');
-  const externalCompleted = submissions.filter((item) => item.status === 'EXTERNAL_EVAL_COMPLETED');
+  const filteredSubmissions = useMemo(
+    () => filterItemsByStatus(submissions, statusFilter, (item) => item.status),
+    [statusFilter, submissions]
+  );
+
+  const pending = filteredSubmissions.filter((item) => item.status === 'FORWARDED_TO_FPGC');
+  const approved = filteredSubmissions.filter((item) => item.status === 'APPROVED');
+  const rejected = filteredSubmissions.filter((item) => item.status === 'REJECTED');
+  const externalAssigned = filteredSubmissions.filter((item) => item.status === 'EXTERNAL_EVAL_ASSIGNED');
+  const externalCompleted = filteredSubmissions.filter((item) => item.status === 'EXTERNAL_EVAL_COMPLETED');
 
   const cards = [
     {
@@ -827,6 +856,13 @@ export function FPGCDashboard({ navigation }) {
           <RefreshControl refreshing={refreshing} onRefresh={refresh} />
         }
       >
+        <StatusFilterDropdown
+          label="Submission Status"
+          value={statusFilter}
+          options={SUBMISSION_STATUS_FILTER_OPTIONS}
+          onChange={setStatusFilter}
+        />
+
         {cards.map((card) => (
           <View key={card.label} style={s.statCard}>
             <View
@@ -855,10 +891,19 @@ export function FPGCDashboard({ navigation }) {
           </View>
         ))}
 
+        <TouchableOpacity
+          style={s.semesterActionBtn}
+          onPress={() => navigation.navigate('SemesterManagement')}
+        >
+          <Ionicons name="calendar-outline" size={20} color="#1E56A0" />
+          <Text style={s.semesterActionText}>Manage Semesters</Text>
+          <Ionicons name="chevron-forward" size={18} color="#1E56A0" />
+        </TouchableOpacity>
+
         <Text style={s.sectionTitle}>Recent FPGC Items</Text>
 
         {submissions.slice(0, 3).map((item) => (
-          <SubmissionCard key={item.id} item={item} />
+          <SubmissionCard key={item.id} item={item} onRefresh={refresh} />
         ))}
 
         {submissions.length === 0 && (
@@ -877,8 +922,14 @@ export function FPGCDashboard({ navigation }) {
 
 export function FPGCApplications({ navigation }) {
   const { submissions, loading, refreshing, refresh } = useFPGCSubmissions();
+  const [statusFilter, setStatusFilter] = useState(ALL_STATUS_VALUE);
 
-  const finalised = submissions.filter((item) =>
+  const filteredSubmissions = useMemo(
+    () => filterItemsByStatus(submissions, statusFilter, (item) => item.status),
+    [statusFilter, submissions]
+  );
+
+  const finalised = filteredSubmissions.filter((item) =>
     ['APPROVED', 'REJECTED', 'EXTERNAL_EVAL_ASSIGNED', 'EXTERNAL_EVAL_COMPLETED'].includes(item.status)
   );
 
@@ -894,6 +945,15 @@ export function FPGCApplications({ navigation }) {
     <View style={s.container}>
       <FPGCHeader title="Applications" navigation={navigation} />
 
+      <View style={s.listHeaderWrap}>
+        <StatusFilterDropdown
+          label="Submission Status"
+          value={statusFilter}
+          options={SUBMISSION_STATUS_FILTER_OPTIONS}
+          onChange={setStatusFilter}
+        />
+      </View>
+
       <FlatList
         data={finalised}
         keyExtractor={(item) => String(item.id)}
@@ -902,7 +962,7 @@ export function FPGCApplications({ navigation }) {
           <RefreshControl refreshing={refreshing} onRefresh={refresh} />
         }
         renderItem={({ item }) => (
-          <SubmissionCard item={item} />
+          <SubmissionCard item={item} onRefresh={refresh} />
         )}
         ListEmptyComponent={
           <View style={s.emptyCard}>
@@ -921,6 +981,7 @@ export function FPGCApplications({ navigation }) {
 export function FPGCAssignments({ navigation, route }) {
   const { submissions, loading, refreshing, refresh, reload } = useFPGCSubmissions();
   const { evaluators, loadingEvaluators } = useExternalEvaluators();
+  const [statusFilter, setStatusFilter] = useState(ALL_STATUS_VALUE);
 
   const initialMode = route?.params?.mode === 'external' ? 'external' : 'decisions';
   const [mode, setMode] = useState(initialMode);
@@ -931,8 +992,13 @@ export function FPGCAssignments({ navigation, route }) {
     }
   }, [route?.params?.mode]);
 
-  const pending = submissions.filter((item) => item.status === 'FORWARDED_TO_FPGC');
-  const externalCandidates = submissions.filter((item) =>
+  const filteredSubmissions = useMemo(
+    () => filterItemsByStatus(submissions, statusFilter, (item) => item.status),
+    [statusFilter, submissions]
+  );
+
+  const pending = filteredSubmissions.filter((item) => item.status === 'FORWARDED_TO_FPGC');
+  const externalCandidates = filteredSubmissions.filter((item) =>
     ['FORWARDED_TO_FPGC', 'APPROVED'].includes(item.status)
   );
 
@@ -994,6 +1060,15 @@ export function FPGCAssignments({ navigation, route }) {
         </TouchableOpacity>
       </View>
 
+      <View style={s.listHeaderWrap}>
+        <StatusFilterDropdown
+          label="Submission Status"
+          value={statusFilter}
+          options={SUBMISSION_STATUS_FILTER_OPTIONS}
+          onChange={setStatusFilter}
+        />
+      </View>
+
       <FlatList
         data={data}
         keyExtractor={(item) => String(item.id)}
@@ -1021,6 +1096,7 @@ export function FPGCAssignments({ navigation, route }) {
               item={item}
               onApprove={() => openDecision(item, 'APPROVE')}
               onReject={() => openDecision(item, 'REJECT')}
+              onRefresh={reload}
             />
           )
         }
@@ -1320,6 +1396,20 @@ const s = StyleSheet.create({
     marginTop: 2,
     marginBottom: 4,
   },
+  semesterActionBtn: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  semesterActionText: { flex: 1, fontSize: 14, color: '#1E56A0', fontWeight: '800' },
   viewMore: { fontSize: 13, color: '#1E56A0', fontWeight: '500' },
   sectionTitle: {
     fontSize: 18,
@@ -1560,6 +1650,10 @@ const s = StyleSheet.create({
   },
   segmentTextActive: {
     color: '#FFFFFF',
+  },
+  listHeaderWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
   },
   smallLabel: {
     color: '#0D1B2A',

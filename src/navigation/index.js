@@ -36,6 +36,7 @@ import UsersScreen from '../screens/admin/UsersScreen';
 import SubmissionsOverviewScreen from '../screens/admin/SubmissionsOverviewScreen';
 import SettingsScreen from '../screens/admin/SettingsScreen';
 import AdminNotificationsScreen from '../screens/admin/NotificationsScreen';
+import SemesterManagementScreen from '../screens/admin/SemesterManagementScreen';
 
 // ─── Supervisor ───────────────────────────────────────────────────────────────
 import SupervisorDashboardScreen from '../screens/supervisor/DashboardScreen';
@@ -632,6 +633,7 @@ function FPGCStack() {
       <Stack.Screen name="FPGCAssignments" component={FPGCAssignments} />
       <Stack.Screen name="FPGCNotifications" component={FPGCNotifications} />
       <Stack.Screen name="FPGCProfile" component={FPGCProfile} />
+      <Stack.Screen name="SemesterManagement" component={SemesterManagementScreen} />
     </Stack.Navigator>
   );
 }
@@ -675,6 +677,7 @@ function AdminStack() {
       <Stack.Screen name="AdminTabs" component={AdminTabs} />
       <Stack.Screen name="NotificationsList" component={AdminNotificationsScreen} />
       <Stack.Screen name="Profile" component={SettingsScreen} />
+      <Stack.Screen name="SemesterManagement" component={SemesterManagementScreen} />
     </Stack.Navigator>
   );
 }

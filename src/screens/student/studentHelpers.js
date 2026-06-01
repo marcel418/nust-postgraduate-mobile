@@ -130,6 +130,8 @@ export function getSubmissionState(item = {}) {
 export function normalizeSubmission(item = {}) {
   const details = parseDescription(item.description);
   const state = getSubmissionState(item);
+  const semesterLabel = item.semester_label || item.semesterLabel || details.reportingPeriod || 'N/A';
+  const documentLabel = item.document_label || item.documentLabel || details.fileName || '';
 
   return {
     ...item,
@@ -141,18 +143,24 @@ export function normalizeSubmission(item = {}) {
     statusColor: getStatusColor(state),
     type: item.submission_type || item.type || 'PROGRESS_REPORT',
     typeLabel: formatLabel(item.submission_type || item.type || 'Progress Report'),
-    fileName: details.fileName || item.title || 'Uploaded document',
+    fileName: documentLabel || details.fileName || item.title || 'Uploaded document',
     fileSize: details.fileSize || 'Metadata saved',
     documentId: details.documentId,
-    reportingPeriod: details.reportingPeriod || 'N/A',
+    reportingPeriod: semesterLabel,
+    semesterLabel,
+    documentLabel,
+    trackingLabel: documentLabel || semesterLabel || 'N/A',
     comments: details.comments || '',
     createdAt: item.created_at || item.createdAt || item.updated_at,
     updatedAt: item.updated_at || item.updatedAt || item.created_at,
     versionNo: item.current_version_no || item.version_no || 1,
+    semesterId: item.semester_id || item.semesterId || null,
+    dueDate: item.due_date || item.dueDate || null,
+    extendedDueDate: item.extended_due_date || item.extendedDueDate || null,
   };
 }
 
-export function getProgressPercentage(state) {
+export function getProgressFromState(state) {
   if (state === 'REJECTED') return 100;
   if (state === 'REVISIONS_REQUIRED') return 45;
 
@@ -161,6 +169,41 @@ export function getProgressPercentage(state) {
   if (index < 0) return 10;
 
   return Math.max(8, Math.min(100, Math.round((index / (WORKFLOW_ORDER.length - 1)) * 100)));
+}
+
+export function getProgressPercentage(input) {
+  const submission = input && typeof input === 'object' ? input : { current_state: input };
+  const state = getSubmissionState(submission);
+  const createdAt = submission.created_at || submission.createdAt;
+  const dueDate = submission.extended_due_date || submission.extendedDueDate || submission.due_date || submission.dueDate;
+
+  if (!dueDate) {
+    return getProgressFromState(state);
+  }
+
+  const start = createdAt ? new Date(createdAt) : null;
+  const end = dueDate ? new Date(dueDate) : null;
+
+  if (!start || Number.isNaN(start.getTime()) || !end || Number.isNaN(end.getTime())) {
+    return getProgressFromState(state);
+  }
+
+  const now = new Date();
+
+  if (now >= end) {
+    return 100;
+  }
+
+  const total = end.getTime() - start.getTime();
+
+  if (total <= 0) {
+    return getProgressFromState(state);
+  }
+
+  const elapsed = now.getTime() - start.getTime();
+  const percentage = Math.round((elapsed / total) * 100);
+
+  return Math.max(0, Math.min(100, percentage));
 }
 
 export function getInitials(name) {

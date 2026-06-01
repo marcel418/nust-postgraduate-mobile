@@ -28,7 +28,7 @@ import {
   sortNewestFirst,
 } from './studentHelpers';
 
-const REPORTING_PERIODS = ['Today', 'This Week', 'This Month', 'Last 30 Days', 'Semester', 'Final Submission'];
+const REPORTING_PERIODS = ['This Semester', 'Final Submission'];
 
 const SUBMISSION_TYPES = [
   { label: 'Progress Report', value: 'PROGRESS_REPORT' },
@@ -235,6 +235,32 @@ export default function SubmissionsScreen({ navigation }) {
     }
   };
 
+  const handleDeleteDocument = async (submissionId) => {
+    Alert.alert(
+      'Delete Uploaded File',
+      'Are you sure you want to remove the uploaded file for this submission? This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setSubmitting(true);
+              await submissionsApi.deleteDocument(submissionId);
+              await loadSubmissions();
+              Alert.alert('Deleted', 'Uploaded file removed successfully.');
+            } catch (error) {
+              Alert.alert('Delete Failed', error?.message || 'Could not delete uploaded file.');
+            } finally {
+              setSubmitting(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
       <View style={styles.emptyIcon}>
@@ -278,7 +304,7 @@ export default function SubmissionsScreen({ navigation }) {
 
         <View style={styles.detailRow}>
           <Ionicons name="calendar-outline" size={14} color="#6B7280" />
-          <Text style={styles.detailText}>Period: {item.reportingPeriod}</Text>
+          <Text style={styles.detailText}>Tracking: {item.trackingLabel || item.reportingPeriod || 'N/A'}</Text>
         </View>
 
         <View style={styles.detailRow}>
@@ -293,11 +319,11 @@ export default function SubmissionsScreen({ navigation }) {
           </View>
         )}
 
-        <TouchableOpacity
-          style={[styles.openDocumentBtn, !item.documentId && styles.disabledOpenDocumentBtn]}
-          onPress={() => handleOpenDocument(item.documentId, item.fileName)}
-          disabled={!item.documentId || isOpening}
-        >
+          <TouchableOpacity
+            style={[styles.openDocumentBtn, !item.documentId && styles.disabledOpenDocumentBtn]}
+            onPress={() => handleOpenDocument(item.documentId, item.fileName)}
+            disabled={!item.documentId || isOpening}
+          >
           {isOpening ? (
             <ActivityIndicator size="small" color="#1E56A0" />
           ) : (
@@ -305,6 +331,17 @@ export default function SubmissionsScreen({ navigation }) {
           )}
           <Text style={styles.openDocumentText}>{item.documentId ? 'Open Uploaded File' : 'No Uploaded File'}</Text>
         </TouchableOpacity>
+
+        {item.documentId && (
+          <TouchableOpacity
+            style={[styles.deleteDocumentBtn]}
+            onPress={() => handleDeleteDocument(item.id)}
+            disabled={submitting}
+          >
+            <Ionicons name="trash-outline" size={16} color="#EF4444" />
+            <Text style={[styles.deleteDocumentText]}>Delete File</Text>
+          </TouchableOpacity>
+        )}
 
         {item.state !== 'DRAFT' && (
           <View style={styles.workflowNotice}>
@@ -494,6 +531,8 @@ const styles = StyleSheet.create({
   openDocumentBtn: { backgroundColor: '#EFF6FF', borderRadius: 10, paddingVertical: 11, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: '#BFDBFE' },
   disabledOpenDocumentBtn: { opacity: 0.6 },
   openDocumentText: { color: '#1E56A0', fontSize: 13, fontWeight: '700' },
+  deleteDocumentBtn: { marginTop: 8, backgroundColor: '#FFF7F7', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: '#FEE2E2' },
+  deleteDocumentText: { color: '#EF4444', fontSize: 13, fontWeight: '700' },
   workflowNotice: { backgroundColor: '#EFF6FF', borderRadius: 8, padding: 10, borderLeftWidth: 3, borderLeftColor: '#1E56A0', flexDirection: 'row', alignItems: 'center', gap: 6 },
   workflowNoticeText: { fontSize: 13, color: '#1E56A0', flex: 1, fontWeight: '600' },
   modalContainer: { flex: 1, backgroundColor: '#F0F2F5' },

@@ -31,7 +31,13 @@ async function auth(req, res, next) {
       return error(req, res, 'User not found.', 401);
     }
 
-    req.user = userResult.rows[0];
+    req.user = {
+      id: userResult.rows[0].id,
+      name: userResult.rows[0].name,
+      email: userResult.rows[0].email,
+      status: userResult.rows[0].status,
+      roles: userResult.rows[0].roles,
+    };
     next();
   } catch (err) {
     return error(req, res, 'Invalid or expired token.', 401);

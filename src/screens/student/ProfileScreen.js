@@ -34,6 +34,20 @@ export default function StudentProfileScreen({ navigation }) {
   const [course, setCourse] = useState(authUser?.course || 'Postgraduate Programme');
   const [isEditing, setIsEditing] = useState(false);
 
+  const getOptionalDisplayValue = (value) => {
+    if (!value) return 'Not assigned';
+
+    if (typeof value === 'string') {
+      return value.trim() || 'Not assigned';
+    }
+
+    if (typeof value === 'object') {
+      return value.name || 'Not assigned';
+    }
+
+    return 'Not assigned';
+  };
+
   const loadProfileContext = useCallback(async () => {
     try {
       const response = await submissionsApi.list();
@@ -55,7 +69,7 @@ export default function StudentProfileScreen({ navigation }) {
   }, [authUser, loadProfileContext]);
 
   const latestSubmission = submissions[0] || null;
-  const progressPercentage = latestSubmission ? getProgressPercentage(latestSubmission.state) : 0;
+  const progressPercentage = latestSubmission ? getProgressPercentage(latestSubmission) : 0;
   const proposalStage = latestSubmission ? getStatusLabel(latestSubmission.state) : 'Not Started';
 
   const profile = useMemo(
@@ -64,11 +78,14 @@ export default function StudentProfileScreen({ navigation }) {
       email: authUser?.email || 'student@nust.na',
       studentNumber,
       course,
+      department: authUser?.department || null,
+      supervisor: authUser?.supervisor ?? null,
+      coSupervisor: authUser?.co_supervisor ?? null,
       progressPercentage,
       proposalStage,
       role: Array.isArray(roles) && roles.length > 0 ? roles[0] : 'STUDENT',
     }),
-    [authUser?.email, course, name, progressPercentage, proposalStage, roles, studentNumber]
+    [authUser?.co_supervisor, authUser?.department, authUser?.email, authUser?.supervisor, course, name, progressPercentage, proposalStage, roles, studentNumber]
   );
 
   const handleSave = async () => {
@@ -158,6 +175,9 @@ export default function StudentProfileScreen({ navigation }) {
                   { icon: 'mail-outline', label: 'Email', value: profile.email },
                   { icon: 'card-outline', label: 'Student Number', value: profile.studentNumber },
                   { icon: 'school-outline', label: 'Course', value: profile.course },
+                  { icon: 'business-outline', label: 'Department', value: getOptionalDisplayValue(profile.department) },
+                  { icon: 'person-circle-outline', label: 'Supervisor', value: getOptionalDisplayValue(profile.supervisor) },
+                  { icon: 'people-outline', label: 'Co-supervisor', value: getOptionalDisplayValue(profile.coSupervisor) },
                   { icon: 'bar-chart-outline', label: 'Progress', value: `${profile.progressPercentage}%` },
                   { icon: 'flag-outline', label: 'Current Stage', value: profile.proposalStage },
                 ].map((item, index, array) => (

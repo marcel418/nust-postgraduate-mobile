@@ -14,7 +14,28 @@ import {
 } from 'react-native';
 
 import { notificationsApi } from '../../api/notificationsApi';
-import { formatDate, formatTime } from './studentHelpers';
+import { formatDate, formatLabel, formatTime } from './studentHelpers';
+
+function getCategoryChipConfig(category) {
+  if (!category) {
+    return null;
+  }
+
+  switch (String(category).toUpperCase()) {
+    case 'DEADLINE':
+      return { label: 'DEADLINE', backgroundColor: '#FFF7ED', textColor: '#C2410C' };
+    case 'OVERDUE':
+      return { label: 'OVERDUE', backgroundColor: '#FEE2E2', textColor: '#B91C1C' };
+    case 'WORKFLOW':
+      return { label: 'WORKFLOW', backgroundColor: '#DBEAFE', textColor: '#1D4ED8' };
+    default:
+      return {
+        label: formatLabel(category),
+        backgroundColor: '#F3F4F6',
+        textColor: '#6B7280',
+      };
+  }
+}
 
 export default function NotificationsScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
@@ -84,6 +105,7 @@ export default function NotificationsScreen({ navigation }) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         renderItem={({ item }) => {
           const unread = !(item.read_at || item.read);
+          const categoryChip = getCategoryChipConfig(item.category);
 
           return (
             <TouchableOpacity
@@ -102,6 +124,14 @@ export default function NotificationsScreen({ navigation }) {
                 <Text style={[styles.notifMessage, unread && styles.unreadText]}>
                   {item.message || item.title || 'Workflow notification'}
                 </Text>
+
+                {categoryChip && (
+                  <View style={[styles.categoryChip, { backgroundColor: categoryChip.backgroundColor }]}>
+                    <Text style={[styles.categoryChipText, { color: categoryChip.textColor }]}>
+                      {categoryChip.label}
+                    </Text>
+                  </View>
+                )}
 
                 <Text style={styles.notifTime}>
                   {formatDate(item.created_at)} · {formatTime(item.created_at)}
@@ -138,6 +168,8 @@ const styles = StyleSheet.create({
   notifContent: { flex: 1, gap: 4 },
   notifMessage: { fontSize: 14, color: '#0A1931', lineHeight: 20, fontWeight: '500' },
   unreadText: { fontWeight: '800' },
+  categoryChip: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  categoryChipText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
   notifTime: { fontSize: 12, color: '#9BA4B5' },
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#1E56A0', marginTop: 4 },
 });

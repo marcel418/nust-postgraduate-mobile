@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 
 import AppHeader from '../../components/AppHeader';
+import StatusFilterDropdown from '../../components/common/StatusFilterDropdown';
 import { submissionsApi } from '../../api/submissionsApi';
 import {
   formatDate,
@@ -25,11 +26,17 @@ import {
   normalizeSubmission,
   SUPERVISOR_VISIBLE_STATES,
 } from './supervisorHelpers';
+import {
+  ALL_STATUS_VALUE,
+  SUBMISSION_STATUS_FILTER_OPTIONS,
+  filterItemsByStatus,
+} from '../../utils/statusFilters';
 
 export default function SupervisorDashboardScreen({ navigation }) {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [statusFilter, setStatusFilter] = useState(ALL_STATUS_VALUE);
 
   const loadData = useCallback(async () => {
     try {
@@ -59,18 +66,23 @@ export default function SupervisorDashboardScreen({ navigation }) {
     loadData();
   }, [loadData]);
 
-  const students = useMemo(
-    () => groupStudentsFromSubmissions(submissions.map((item) => item.raw || item)),
-    [submissions]
+  const filteredSubmissions = useMemo(
+    () => filterItemsByStatus(submissions, statusFilter, (item) => item.state),
+    [statusFilter, submissions]
   );
 
-  const pendingCount = submissions.filter((item) => item.state === 'SUBMITTED').length;
-  const returnedCount = submissions.filter((item) => item.state === 'REVISIONS_REQUIRED').length;
-  const thesisCount = submissions.filter(
+  const students = useMemo(
+    () => groupStudentsFromSubmissions(filteredSubmissions.map((item) => item.raw || item)),
+    [filteredSubmissions]
+  );
+
+  const pendingCount = filteredSubmissions.filter((item) => item.state === 'SUBMITTED').length;
+  const returnedCount = filteredSubmissions.filter((item) => item.state === 'REVISIONS_REQUIRED').length;
+  const thesisCount = filteredSubmissions.filter(
     (item) => item.type === 'THESIS' && item.state === 'SUBMITTED'
   ).length;
 
-  const recentSubmissions = submissions.slice(0, 5);
+  const recentSubmissions = filteredSubmissions.slice(0, 5);
 
   const refresh = () => {
     setRefreshing(true);
@@ -96,6 +108,14 @@ export default function SupervisorDashboardScreen({ navigation }) {
           <RefreshControl refreshing={refreshing} onRefresh={refresh} />
         }
       >
+        <StatusFilterDropdown
+          label="Submission Status"
+          value={statusFilter}
+          options={SUBMISSION_STATUS_FILTER_OPTIONS}
+          onChange={setStatusFilter}
+          style={{ marginBottom: 16 }}
+        />
+
         <View style={styles.statsRow}>
           <TouchableOpacity
             style={styles.statCard}

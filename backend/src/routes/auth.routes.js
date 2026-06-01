@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const pool = require('../db');
 const { auth } = require('../middleware/auth');
 const { success, error } = require('../utils/response');
+const { buildAuthenticatedUserProfile } = require('../utils/profile');
 
 const router = express.Router();
 
@@ -75,15 +76,44 @@ router.post('/logout', auth, async (req, res) => {
 });
 
 router.get('/me', auth, async (req, res) => {
-  return success(req, res, {
-    user: {
-      id: req.user.id,
-      name: req.user.name,
-      email: req.user.email,
-    },
-    roles: req.user.roles || [],
-    permissions: [],
-  });
+  try {
+    const result = await pool.query(
+      `
+      select
+        u.id,
+        u.name,
+        u.email,
+        u.department,
+        u.supervisor_id,
+        sup.name as supervisor_name,
+        u.co_supervisor_id,
+        co_sup.name as co_supervisor_name,
+        coalesce(json_agg(r.code) filter (where r.code is not null), '[]') as roles
+      from users u
+      left join users sup on sup.id = u.supervisor_id
+      left join users co_sup on co_sup.id = u.co_supervisor_id
+      left join user_roles ur on ur.user_id = u.id
+      left join roles r on r.id = ur.role_id
+      where u.id = $1
+      group by u.id, u.name, u.email, u.department, u.supervisor_id, sup.name, u.co_supervisor_id, co_sup.name
+      `,
+      [req.user.id]
+    );
+
+    if (result.rowCount === 0) {
+      return error(req, res, 'User not found.', 404);
+    }
+
+    const user = result.rows[0];
+
+    return success(req, res, {
+      user: buildAuthenticatedUserProfile(user),
+      roles: user.roles || [],
+      permissions: [],
+    });
+  } catch (err) {
+    return error(req, res, 'Failed to load profile.', 500, err.message);
+  }
 });
 
 module.exports = router;

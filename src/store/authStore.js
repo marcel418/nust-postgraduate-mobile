@@ -27,11 +27,19 @@ function extractProfile(response) {
   const data = unwrapApiData(response);
 
   const user = data?.user || data?.profile || data || null;
+  const normalizedUser = user
+    ? {
+        ...user,
+        department: user.department ?? null,
+        supervisor: user.supervisor ?? null,
+        co_supervisor: user.co_supervisor ?? null,
+      }
+    : null;
 
   return {
-    user,
-    roles: data?.roles || user?.roles || [],
-    permissions: data?.permissions || user?.permissions || [],
+    user: normalizedUser,
+    roles: data?.roles || normalizedUser?.roles || [],
+    permissions: data?.permissions || normalizedUser?.permissions || [],
   };
 }
 

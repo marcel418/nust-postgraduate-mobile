@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -141,8 +142,19 @@ export default function AppHeader({
     loadNotificationCount();
 
     const unsubscribe = navigation?.addListener?.('focus', loadNotificationCount);
+    const appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        loadNotificationCount();
+      }
+    });
 
-    return unsubscribe;
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+
+      appStateSubscription?.remove?.();
+    };
   }, [navigation, loadNotificationCount]);
 
   const handleNotifications = () => {

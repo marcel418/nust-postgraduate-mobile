@@ -10,6 +10,8 @@ const authRoutes = require('./routes/auth.routes');
 const submissionsRoutes = require('./routes/submissions.routes');
 const notificationsRoutes = require('./routes/notifications.routes');
 const documentsRoutes = require('./routes/documents.routes');
+const semestersRoutes = require('./routes/semesters.routes');
+const { registerDeadlineNotificationJob } = require('./jobs/deadlineNotifications.job');
 
 const { success, error } = require('./utils/response');
 
@@ -56,6 +58,9 @@ listRoutes('auth', authRoutes);
 listRoutes('submissions', submissionsRoutes);
 listRoutes('notifications', notificationsRoutes);
 listRoutes('documents', documentsRoutes);
+listRoutes('semesters', semestersRoutes);
+
+registerDeadlineNotificationJob();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Health Check
@@ -78,6 +83,7 @@ app.use('/api/v1/users', usersRoutes);
 app.use('/api/v1/submissions', submissionsRoutes);
 app.use('/api/v1/notifications', notificationsRoutes);
 app.use('/api/v1/documents', documentsRoutes);
+app.use('/api/v1/semesters', semestersRoutes);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 404 Handler

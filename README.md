@@ -50,6 +50,43 @@ All API calls are routed through `src/services/api/client.js` — never call fet
 
 ---
 
+## Feature Summary
+
+### Student Features
+
+- Student file deletion before due date
+- File ownership validation
+- Due-date enforcement
+- Reporting Period selector: `This Semester`, `Final Submission`
+- Submission/file labels displayed with progress tracking
+
+### Administrative Features
+
+- Admin user update functionality
+- User information management improvements
+
+### Submission Workflow Enhancements
+
+- Submission metadata improvements
+- Reporting period persistence
+- Progress display enhancements
+
+### Authorization and Security
+
+- Student-owned file deletion enforcement
+- Removal of unintended deletion privilege escalation
+- Role-based protection maintained
+- No changes to authentication or JWT contracts
+
+### Compatibility Notes
+
+- Backward compatibility maintained
+- Existing submissions continue to load
+- Existing workflow states unchanged
+- Existing authentication flows unchanged
+
+---
+
 ## Prerequisites
 
 | Tool | Version | Install |
