@@ -1,229 +1,188 @@
-# NUST Postgraduate System — Mobile App
+# NUST Postgraduate Management System
 
-React Native (Expo Managed) mobile client for the NUST Postgraduate System.  
-Connects to the Laravel 11 backend via Sanctum Bearer token authentication.
+## Project Overview
 
----
+The NUST Postgraduate Management System is a postgraduate workflow platform for managing student submissions, supervisory reviews, departmental approvals, evaluator feedback, notifications, and administrative oversight. This repository contains the mobile client and the companion backend service used to support the workflow end to end.
 
-## Tech Stack
+## Objectives
 
-| Layer | Technology | Version | Purpose |
-|-------|-----------|---------|---------|
-| Framework | React Native (Expo Managed) | SDK 53 | Cross-platform mobile app |
-| Language | JavaScript (JSX) | ES2022 | App logic and UI |
-| Navigation | React Navigation (Native Stack) | v7 | Screen routing |
-| HTTP Client | Axios | v1.15 | API calls to Laravel backend |
-| State Management | Zustand | v5 | Global auth and app state |
-| Secure Storage | expo-secure-store | v15 | Storing Bearer tokens securely |
-| File Handling | expo-document-picker | latest | Thesis/report file uploads |
-| File System | expo-file-system | latest | Reading/writing local files |
-| Linting | ESLint | v9 | Code quality enforcement |
-| CI/CD | GitHub Actions + EAS Build | latest | Automated builds and testing |
-| Build Service | Expo EAS | latest | Cloud APK/IPA builds |
+- Provide a role-based mobile interface for postgraduate users.
+- Support submission, review, approval, and decision-making workflows.
+- Keep documents, deadlines, and reporting periods aligned with the active academic semester.
+- Improve traceability through notifications, audit logging, and workflow status tracking.
+- Offer a submission-ready codebase with clear technical documentation.
 
----
+## Technology Stack
 
-## Backend Integration
+Frontend:
 
-The mobile app is a **consumer** of the NUST Postgraduate System REST API built with Laravel 11.
+- React Native
+- Expo
+- React Navigation
 
-| Detail | Value |
-|--------|-------|
-| Auth method | Sanctum Bearer Token |
-| Base URL | `/api/v1/` |
-| Data format | JSON |
-| Token storage | `expo-secure-store` (encrypted on device) |
+Backend:
 
-All API calls are routed through `src/services/api/client.js` — never call fetch or axios directly in screen files.
+- Node.js
+- Express
 
----
+Database:
 
-## Project Modules (Mobile)
+- PostgreSQL
 
-| Module | Description |
-|--------|-------------|
-| Auth | Login, logout, session restore |
-| Student | Application submission and tracking |
-| Supervisor | Student oversight and approvals |
-| Internal Evaluator | Checklist review and sign-off |
-| External Evaluator | Thesis download, grading, honorarium claim |
+Infrastructure:
 
----
+- Docker-ready deployment environment
+- Expo development tooling
 
-## Feature Summary
+## System Roles
 
-### Student Features
+Student
 
-- Student file deletion before due date
-- File ownership validation
-- Due-date enforcement
-- Reporting Period selector: `This Semester`, `Final Submission`
-- Submission/file labels displayed with progress tracking
+- Creates and manages submission records.
+- Uploads and removes documents while the workflow rules allow it.
+- Tracks progress, feedback, and notifications.
 
-### Administrative Features
+Supervisor
 
-- Admin user update functionality
-- User information management improvements
+- Reviews student submissions and reports.
+- Provides feedback and workflow actions where required.
 
-### Submission Workflow Enhancements
+HOD
 
-- Submission metadata improvements
-- Reporting period persistence
-- Progress display enhancements
+- Oversees departmental submission workflows.
+- Assigns internal evaluators and proposes external evaluators.
 
-### Authorization and Security
+FPGC
 
-- Student-owned file deletion enforcement
-- Removal of unintended deletion privilege escalation
-- Role-based protection maintained
-- No changes to authentication or JWT contracts
+- Manages academic committee review and assignment processes.
 
-### Compatibility Notes
+FPGCR
 
-- Backward compatibility maintained
-- Existing submissions continue to load
-- Existing workflow states unchanged
-- Existing authentication flows unchanged
+- Handles review confirmation and final decision support.
 
----
+External Evaluator
 
-## Prerequisites
+- Reviews assigned theses and submits assessment-related actions.
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Node.js | 20.19.4+ | https://nodejs.org |
-| Git | any | https://git-scm.com |
-| Expo Go app | latest | App Store / Play Store |
+Administrator
 
----
+- Manages users, semester configuration, notifications, and system settings.
 
-## Getting Started (New Team Member)
+## Workflow Overview
 
-### 1. Accept the GitHub invite
+Student -> Supervisor -> HOD -> FPGC -> External Evaluator -> FPGCR -> Final Decision
 
-Check your email for a GitHub collaboration invite and accept it, then clone:
+The implementation also supports internal evaluator and administrative paths where they are required by the institutional workflow.
+
+## Architecture Overview
+
+Frontend structure
+
+- `App.js` boots authentication state and loads the navigation tree.
+- `src/navigation/` contains the role-based stack and tab navigation.
+- `src/screens/` contains role-specific screens for students, supervisors, HOD, evaluators, FPGC, FPGCR, and administrators.
+- `src/components/` contains reusable UI elements such as deadline controls and shared headers.
+- `src/api/` and `src/services/` centralize HTTP access and service wrappers.
+
+Backend structure
+
+- `backend/src/server.js` initializes the API server, middleware, routes, and background jobs.
+- `backend/src/routes/` contains the resource endpoints for authentication, submissions, notifications, documents, semesters, and users.
+- `backend/src/jobs/` contains scheduled workflow tasks such as deadline notifications.
+- `backend/src/middleware/` contains authentication protection.
+
+Database structure
+
+- `backend/sql/schema.sql` defines the PostgreSQL schema.
+- Core tables cover users, roles, semesters, submissions, submission versions, documents, workflow instances, workflow tasks, workflow transitions, notifications, and audit logs.
+- Indexes and foreign keys enforce workflow integrity and improve query performance.
+
+## Installation Guide
+
+### Clone repository
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/nust-postgraduate-mobile.git
-cd nust-postgraduate-mobile
+git clone <repository-url>
+cd nust-postgraduate-mobile-develop
 ```
 
-### 2. Install dependencies
+### Install dependencies
 
 ```bash
 npm install
+cd backend
+npm install
+cd ..
 ```
 
-### 3. Set up your local environment
+### Environment configuration
+
+- Copy `.env.development` to `.env` for the mobile app if you need a local override.
+- Configure the backend environment values in the backend `.env` file, including the PostgreSQL connection settings.
+- Set the mobile API base URL so it points to the running backend service.
+
+### Docker setup
+
+- Use your Docker or Docker Compose environment if your deployment workflow runs the backend and PostgreSQL inside containers.
+- Ensure the backend container can reach the PostgreSQL service and that the Expo app points to the correct API URL.
+- This repository does not include Docker compose files, so use the project-specific container setup provided by your deployment environment.
+
+### Database setup
 
 ```bash
-cp .env.development .env.local
+cd backend
+node scripts/seed.js
 ```
 
-Open `.env.local` and set `EXPO_PUBLIC_API_URL` to the backend URL:
-- **Running backend locally:** `http://localhost:8000`
-- **Shared dev server:** ask the team lead for the URL
+- Apply the SQL schema in `backend/sql/schema.sql` to your PostgreSQL database before starting the backend.
+- Load seed data if you need a pre-populated development environment.
 
-### 4. Start the development server
+### Running the application
 
 ```bash
-npx expo start
+# Mobile app
+npm start
+
+# Backend API
+cd backend
+npm run dev
 ```
 
-Scan the QR code with **Expo Go** on your phone.
+Use Expo Go or an emulator to open the mobile app after the Expo bundler starts.
 
----
+## Lecturer Suggestions Implemented
 
-## Project Structure
+The current `main` and `develop` branch tips resolve to the same application snapshot, so there is no remaining branch-level code delta to merge in this comparison. The improvements below are verified in the codebase and reflected in the current implementation.
 
-```
-src/
-├── screens/
-│   ├── auth/           # Login screen
-│   ├── evaluator/      # Internal & External Evaluator screens
-│   ├── student/        # Student module screens
-│   └── supervisor/     # Supervisor module screens
-├── components/
-│   └── common/         # Shared UI components (buttons, cards, inputs)
-├── navigation/         # React Navigation stack setup
-├── services/
-│   └── api/
-│       └── client.js   # Axios instance — all API calls go through here
-├── store/
-│   └── authStore.js    # Zustand store — auth state (login, logout, token)
-├── hooks/              # Custom React hooks
-├── utils/              # Helper functions
-└── constants/          # App-wide constants (colors, route names, etc.)
-```
+- UI/UX improvements: dedicated role screens, consistent role-specific headers, and clearer action grouping improve navigation clarity and reduce cognitive load.
+- Design system implementation: shared components such as `AppHeader`, `HODHeader`, `DeadlineExtensionControl`, and status/filter helpers give the app a more consistent visual and interaction model.
+- Navigation improvements: the role-aware navigator in `src/navigation/index.js` routes users into dedicated stacks for student, supervisor, HOD, evaluator, external evaluator, FPGC, FPGCR, and admin workflows.
+- Workflow improvements: submission handling supports reporting periods, deadline extensions, workflow progress tracking, and role-specific review actions.
+- Role-specific enhancements: each role has its own dashboard and task screens, including submission review, evaluator assignment, review reporting, and administrative management.
+- Validation improvements: the backend validates date inputs, ownership rules, deadline extension rules, and semester uniqueness before persisting changes.
+- Error handling improvements: API routes and screens provide explicit user-facing error messages for failed loads, invalid actions, and forbidden operations.
+- Database improvements: the PostgreSQL schema adds workflow instance tables, submission versioning, notification tracking, audit logging, and supporting indexes for faster lookup.
+- Performance improvements: indexed submission, workflow-task, and notification columns reduce repeated lookup cost in the busiest workflow paths.
 
----
+## Repository Structure
 
-## Branching Strategy
+- `src/` - mobile application source code, screens, components, navigation, APIs, and utilities.
+- `backend/` - API service, database schema, jobs, middleware, and server routes.
+- `docs/` - submission documentation and project notes.
+- `docs/Technical-Documentation/` - final Word or PDF technical document location.
 
-| Branch | Purpose |
-|--------|---------|
-| `main` | Production-ready code only. Never push directly. |
-| `develop` | Integration branch. All feature branches merge here. |
-| `feature/your-feature-name` | Your individual working branch |
+## Technical Documentation
 
-### Daily Workflow
+The final technical document should be placed in `docs/Technical-Documentation/`.
 
-```bash
-# 1. Always start from develop
-git checkout develop
-git pull
+## Team Information
 
-# 2. Create your feature branch
-git checkout -b feature/your-feature-name
+- Student 1: [Add name]
+- Student 2: [Add name]
+- Student 3: [Add name]
+- Student 4: [Add name]
 
-# 3. Do your work, then commit
-git add .
-git commit -m "feat: describe what you did"
+## Notes
 
-# 4. Push your branch
-git push origin feature/your-feature-name
-
-# 5. Open a Pull Request on GitHub targeting develop
-```
-
-### Commit Message Format
-
-| Prefix | When to use |
-|--------|------------|
-| `feat:` | Adding a new feature |
-| `fix:` | Fixing a bug |
-| `chore:` | Config, setup, dependencies |
-| `style:` | UI/styling changes |
-| `docs:` | README or documentation updates |
-
----
-
-## Environment Files
-
-| File | Purpose | Committed to Git? |
-|------|---------|------------------|
-| `.env.development` | Template for local dev | ✅ Yes |
-| `.env.staging` | Used by CI/CD pipeline | ✅ Yes |
-| `.env.local` | Your personal local config | ❌ Never commit |
-
----
-
-## CI/CD Pipeline
-
-Every Pull Request automatically triggers:
-
-1. **Lint** — ESLint must pass with zero errors
-2. **Tests** — Jest test suite runs
-3. **EAS Preview Build** — Generates an APK for the PR
-
-Merging to `main` triggers a **Production Build** via EAS.
-
-> **Note:** EAS builds require an `EAS_TOKEN` secret set in GitHub → Settings → Secrets and variables → Actions.
-
----
-
-## Need Help?
-
-- Check the API documentation (link TBD — Phase 2)
-- Contact the Mobile team lead
-- Open an issue on this GitHub repo
+- All API calls should go through the shared API client layer.
+- Submission and workflow rules are enforced on the backend as well as in the mobile interface.
