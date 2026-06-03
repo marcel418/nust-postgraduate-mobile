@@ -177,10 +177,10 @@ The final technical document should be placed in `docs/Technical-Documentation/`
 
 ## Team Information
 
-- Student 1: [Add name]
-- Student 2: [Add name]
-- Student 3: [Add name]
-- Student 4: [Add name]
+- Student 1: [Marcel Namaseb	221009736	]
+- Student 2: [Domingo Monius	22274493 ]
+- Student 3: [Abraham Mabuta	222002875]
+- Student 4: [Abisai Sem 	221084703]
 
 ## Notes
 
